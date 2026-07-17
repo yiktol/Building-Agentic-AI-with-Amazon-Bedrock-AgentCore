@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Module 02 Demo Prerequisites — AgentCore Runtime
+  
+  This template creates the S3 bucket used for storing agent code artifacts
+  during deployment to AgentCore Runtime.
+  
+  INSTRUCTIONS:
+  1. Deploy this stack BEFORE running any demo scripts:
+     
+     aws cloudformation deploy \
+       --template-file prerequisites.yaml \
+       --stack-name mlagac-m02-demo-prereqs \
+       --capabilities CAPABILITY_NAMED_IAM
+  
+  2. The stack creates:
+     - S3 bucket for code artifacts (auto-named based on account/region)
+  
+  3. After all demos are complete, delete the stack:
+     
+     aws cloudformation delete-stack --stack-name mlagac-m02-demo-prereqs
+  
+  NOTE: The demo deploy.py scripts create their own S3 buckets and IAM roles
+  dynamically. This CloudFormation template is OPTIONAL and provided for
+  environments where pre-provisioned resources are preferred (e.g., locked-down
+  accounts that don't allow dynamic resource creation).
+
+Parameters:
+  BucketPrefix:
+    Type: String
+    Default: agentcore-code
+    Description: Prefix for the S3 bucket name (will append account ID and region)
+
+Resources:
+  # ── S3 Bucket for Agent Code Artifacts ──────────────────────────────────────
+  CodeArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketPrefix}-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 7
+      Tags:
+        - Key: Project
+          Value: MLAGAC-Module02-Demo
+        - Key: Purpose
+          Value: AgentCore Runtime code artifacts
+
+  # ── IAM Role for AgentCore Runtime Execution ────────────────────────────────
+  AgentCoreExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'agentcore-m02-demo-role-${AWS::Region}'
+      Description: Shared execution role for Module 02 demo agents
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: AgentCoreRuntimePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+              # X-Ray tracing
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              # CloudWatch Metrics
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              # Bedrock Model Invocation
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+      Tags:
+        - Key: Project
+          Value: MLAGAC-Module02-Demo
+
+Outputs:
+  BucketName:
+    Description: S3 bucket for agent code artifacts
+    Value: !Ref CodeArtifactBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-BucketName'
+
+  ExecutionRoleArn:
+    Description: IAM execution role ARN for AgentCore Runtime
+    Value: !GetAtt AgentCoreExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  ExecutionRoleName:
+    Description: IAM execution role name
+    Value: !Ref AgentCoreExecutionRole
+
+  Region:
+    Description: AWS Region
+    Value: !Ref AWS::Region

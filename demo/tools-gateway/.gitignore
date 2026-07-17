@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+deployment_package/
+*.zip
+runtime_config.json
+.env
+.venv/
+venv/
+.DS_Store

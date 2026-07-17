@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Module 04 Tools & Gateway Demo Prerequisites.
+  Creates: S3 bucket, IAM roles, Lambda functions for gateway targets.
+
+Resources:
+  # ── S3 Bucket ────────────────────────────────────────────────────────────────
+  CodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'agentcore-tools-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: Expire
+            Status: Enabled
+            ExpirationInDays: 7
+
+  # ── IAM Role: AgentCore Runtime ──────────────────────────────────────────────
+  RuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'agentcore-m04-runtime-role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: RuntimePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:DescribeLogStreams, logs:CreateLogGroup]
+                Resource: [!Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*']
+              - Effect: Allow
+                Action: [logs:DescribeLogGroups]
+                Resource: [!Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*']
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: [!Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*']
+              - Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords, xray:GetSamplingRules, xray:GetSamplingTargets]
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              - Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:Converse, bedrock:ConverseStream]
+                Resource: ['arn:aws:bedrock:*::foundation-model/*', !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*']
+              # Lambda invocation (for Gateway targets)
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:agentcore-m04-*'
+              # Code Interpreter
+              - Effect: Allow
+                Action: bedrock-agentcore:*
+                Resource: '*'
+
+  # ── IAM Role: Lambda execution ───────────────────────────────────────────────
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'agentcore-m04-lambda-role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # ── Lambda: Order Service ────────────────────────────────────────────────────
+  OrderServiceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'agentcore-m04-order-service-${AWS::Region}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            if (event.orderId) {
+              return {
+                orderId: event.orderId,
+                status: 'shipped',
+                items: ['Widget A', 'Gadget B'],
+                total: 149.99,
+                estimatedDelivery: '2025-07-20'
+              };
+            }
+            return {
+              orders: [
+                {orderId: 'ORD-12345', status: 'shipped', total: 149.99},
+                {orderId: 'ORD-12346', status: 'processing', total: 89.50},
+                {orderId: 'ORD-12347', status: 'delivered', total: 234.00}
+              ]
+            };
+          };
+
+  # ── Lambda: Weather Service ──────────────────────────────────────────────────
+  WeatherServiceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'agentcore-m04-weather-service-${AWS::Region}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            const city = event.city || 'Seattle';
+            const weather = {
+              seattle: {temp: 55, condition: 'rainy', humidity: 82},
+              miami: {temp: 85, condition: 'sunny', humidity: 65},
+              tokyo: {temp: 68, condition: 'clear', humidity: 55},
+              london: {temp: 58, condition: 'cloudy', humidity: 75}
+            };
+            const data = weather[city.toLowerCase()] || {temp: 72, condition: 'sunny', humidity: 50};
+            return {city: city, ...data, unit: 'fahrenheit'};
+          };
+
+  # ── Lambda: Calculator Service ───────────────────────────────────────────────
+  CalculatorServiceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'agentcore-m04-calculator-service-${AWS::Region}'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            const toolName = event.bedrockAgentCoreToolName || 'calculate';
+            const expr = event.expression || '0';
+            try {
+              const result = Function('"use strict"; return (' + expr + ')')();
+              return {expression: expr, result: result};
+            } catch (e) {
+              return {expression: expr, error: e.message};
+            }
+          };
+
+  # ── Lambda Permission: Allow AgentCore Gateway to invoke ─────────────────────
+  OrderServiceGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OrderServiceFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock-agentcore.amazonaws.com
+
+  WeatherServiceGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WeatherServiceFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock-agentcore.amazonaws.com
+
+  CalculatorServiceGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CalculatorServiceFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock-agentcore.amazonaws.com
+
+Outputs:
+  BucketName:
+    Value: !Ref CodeBucket
+  RuntimeRoleArn:
+    Value: !GetAtt RuntimeRole.Arn
+  LambdaRoleArn:
+    Value: !GetAtt LambdaRole.Arn
+  OrderServiceArn:
+    Value: !GetAtt OrderServiceFunction.Arn
+  WeatherServiceArn:
+    Value: !GetAtt WeatherServiceFunction.Arn
+  CalculatorServiceArn:
+    Value: !GetAtt CalculatorServiceFunction.Arn
+  Region:
+    Value: !Ref AWS::Region
