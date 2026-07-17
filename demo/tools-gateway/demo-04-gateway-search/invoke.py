@@ -28,8 +28,15 @@ def send_gateway_rpc(gateway_url: str, method: str, params: dict, region: str, r
                          headers={"Content-Type": "application/json", "Accept": "application/json"})
     SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(request)
     req = urllib.request.Request(gateway_url, data=msg.encode(), headers=dict(request.headers), method="POST")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            return {"error": {"code": e.code, "message": body[:200]}}
 
 
 def main():
@@ -61,13 +68,21 @@ def main():
     # Search
     queries = ["find order information", "weather forecast", "do math calculation"]
 
+    import time
     for query in queries:
+        time.sleep(2)  # Avoid rate limiting
         section(f"Search: \"{query}\"")
         info("Uses x_amz_bedrock_agentcore_search (built-in)")
         result = send_gateway_rpc(gateway_url, "tools/call", {
             "name": "x_amz_bedrock_agentcore_search",
             "arguments": {"query": query},
         }, region, rpc_id=hash(query) % 1000)
+
+        err = result.get("error", {})
+        if err:
+            info(f"Search unavailable: {err.get('message', str(err))[:200]}")
+            info("(Search may need more tools to index, or isn't available yet)")
+            continue
 
         content = result.get("result", {}).get("content", [])
         if content:

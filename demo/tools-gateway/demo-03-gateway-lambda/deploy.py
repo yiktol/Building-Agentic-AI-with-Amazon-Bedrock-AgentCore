@@ -39,8 +39,9 @@ def main():
     resp = control.create_gateway(
         name=GATEWAY_NAME,
         protocolType="MCP",
-        authorizerType="NONE",
+        authorizerType="AWS_IAM",
         roleArn=cfg["runtime_role_arn"],
+        protocolConfiguration={"mcp": {"searchType": "SEMANTIC"}},
         description="Demo 3: Gateway with Lambda tool targets",
     )
     gateway_id = resp["gatewayId"]

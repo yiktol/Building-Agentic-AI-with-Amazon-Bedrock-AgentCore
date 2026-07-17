@@ -44,9 +44,20 @@ def main():
     step_header(1, 3, "Creating Cedar Policy Engine")
     info("type: CEDAR | mode: ENFORCE (default-deny)")
 
-    pe_resp = control.create_policy_engine(name="demo05-policy-engine", type="CEDAR")
-    pe_id = pe_resp["policyEngineId"]
-    pe_arn = pe_resp["policyEngineArn"]
+    try:
+        pe_resp = control.create_policy_engine(name="demo05_policy_engine")
+        pe_id = pe_resp["policyEngineId"]
+        pe_arn = pe_resp["policyEngineArn"]
+    except control.exceptions.ConflictException:
+        # Already exists — look it up
+        engines = control.list_policy_engines()
+        for eng in engines.get("policyEngines", engines.get("items", [])):
+            if eng.get("name") == "demo05_policy_engine":
+                pe_id = eng["policyEngineId"]
+                pe_arn = eng["policyEngineArn"]
+                break
+        success("Policy engine already exists")
+
     info(f"Policy Engine ID: {pe_id}")
 
     info("Waiting for ACTIVE...")
@@ -61,8 +72,15 @@ def main():
     step_header(2, 3, "Attaching policy engine to gateway")
     info("mode: ENFORCE → default-deny (only permitted tools are accessible)")
 
+    # Get current gateway config (update_gateway requires all fields)
+    gw = control.get_gateway(gatewayIdentifier=gateway_id)
+
     control.update_gateway(
         gatewayIdentifier=gateway_id,
+        name=gw["name"],
+        roleArn=gw["roleArn"],
+        authorizerType=gw["authorizerType"],
+        protocolType=gw["protocolType"],
         policyEngineConfiguration={"arn": pe_arn, "mode": "ENFORCE"},
     )
     success("Policy engine attached in ENFORCE mode")
@@ -74,7 +92,7 @@ def main():
     cedar_statement = f"""permit(
   principal,
   action == AgentCore::Action::"WeatherService___get_weather",
-  resource == AgentCore::gateway::"{gateway_arn}"
+  resource == AgentCore::Gateway::"{gateway_arn}"
 );"""
 
     info("Policy: Allow ONLY the get_weather tool")
@@ -82,8 +100,9 @@ def main():
 
     control.create_policy(
         policyEngineId=pe_id,
-        name="allow-weather-only",
+        name="allow_weather_only",
         definition={"cedar": {"statement": cedar_statement}},
+        validationMode="IGNORE_ALL_FINDINGS",
     )
     success("Policy created: allow-weather-only")
     info("Now: get_weather → ALLOWED, all other tools → DENIED")
