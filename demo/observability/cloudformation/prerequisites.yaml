@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Module 06 Observability & Evaluations Demo Prerequisites.
+  Creates S3 bucket, IAM roles for Runtime and Evaluation.
+  NOTE: CloudWatch Transaction Search must be enabled separately (one-time, console or CLI).
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: mlagac-m06-demo
+    Description: Prefix for resource names
+
+Resources:
+  # ══════════════════════════════════════════════════════════════════════════════
+  # S3 Bucket for agent deployment packages
+  # ══════════════════════════════════════════════════════════════════════════════
+  CodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectPrefix}-code-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireArtifacts
+            Status: Enabled
+            ExpirationInDays: 7
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: AgentCore Runtime Execution (with OTel, CloudWatch, X-Ray)
+  # ══════════════════════════════════════════════════════════════════════════════
+  RuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-runtime-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: RuntimePermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                  - logs:DescribeIndexPolicies
+                  - logs:PutIndexPolicy
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:StopQuery
+                Resource: '*'
+              - Sid: XRay
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+              - Sid: BedrockInvoke
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+              - Sid: AgentCoreDataPlane
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:*
+                Resource: '*'
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: Evaluation Execution (for online eval and batch eval)
+  # ══════════════════════════════════════════════════════════════════════════════
+  EvaluationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-eval-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EvaluationPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogsReadWrite
+                Effect: Allow
+                Action:
+                  - logs:FilterLogEvents
+                  - logs:GetLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:StopQuery
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Sid: BedrockInvokeForJudge
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+
+Outputs:
+  CodeBucketName:
+    Description: S3 bucket for deployment packages
+    Value: !Ref CodeBucket
+
+  RuntimeExecutionRoleArn:
+    Description: IAM role ARN for AgentCore Runtime (with OTel/X-Ray)
+    Value: !GetAtt RuntimeExecutionRole.Arn
+
+  EvaluationExecutionRoleArn:
+    Description: IAM role ARN for Evaluation service
+    Value: !GetAtt EvaluationExecutionRole.Arn
+
+  Region:
+    Value: !Ref AWS::Region

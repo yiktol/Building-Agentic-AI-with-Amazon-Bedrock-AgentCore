@@ -7,6 +7,8 @@ Instructor-led demonstrations for the Machine Learning & AI on AWS: Generative A
 | Module 02 | [`runtime/`](runtime/) | AgentCore Runtime and Framework Integration |
 | Module 03 | [`identity/`](identity/) | Security and Identity Management |
 | Module 04 | [`tools-gateway/`](tools-gateway/) | Tool Integration and AgentCore Gateway |
+| Module 05 | [`memory/`](memory/) | AgentCore Memory — Short-Term, Long-Term, and Security |
+| Module 06 | [`observability/`](observability/) | Production Monitoring, Observability, and Evaluations |
 
 See the module-specific README for step-by-step instructions.
 

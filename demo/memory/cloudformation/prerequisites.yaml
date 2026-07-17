@@ -1,0 +1,276 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Module 05 Memory Demo Prerequisites.
+  Creates S3 bucket, IAM roles, and AgentCore Memory resources for all demos.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: mlagac-m05-demo
+    Description: Prefix for resource names (IAM, S3)
+  MemoryNamePrefix:
+    Type: String
+    Default: mlagac_m05
+    Description: Prefix for memory resource names (alphanumeric + underscore only)
+
+Resources:
+  # ══════════════════════════════════════════════════════════════════════════════
+  # S3 Bucket for agent deployment packages (Demos 3-4)
+  # ══════════════════════════════════════════════════════════════════════════════
+  CodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectPrefix}-code-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireArtifacts
+            Status: Enabled
+            ExpirationInDays: 7
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: AgentCore Runtime Execution (Demos 3-4)
+  # ══════════════════════════════════════════════════════════════════════════════
+  RuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-runtime-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: RuntimePermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*'
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+              - Sid: XRay
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              - Sid: BedrockInvoke
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+              - Sid: MemoryDataPlane
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:GetEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:ListSessions
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                  - bedrock-agentcore:ListMemoryRecords
+                  - bedrock-agentcore:GetMemoryRecord
+                Resource: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*'
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: Memory Execution (for async extraction pipeline)
+  # ══════════════════════════════════════════════════════════════════════════════
+  MemoryExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-memory-exec-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MemoryExtractionPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BedrockInvoke
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: Scoped to actor A (Demo 5 - IAM isolation)
+  # ══════════════════════════════════════════════════════════════════════════════
+  ScopedRoleActorA:
+    Type: AWS::IAM::Role
+    DependsOn: MemoryWithSemantic
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-actor-A-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScopedMemoryAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: MemoryAccessScopedToActorA
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:GetEvent
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                Resource: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*'
+                Condition:
+                  StringEquals:
+                    bedrock-agentcore:actorId: user-A
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # IAM Role: Scoped to actor B (Demo 5 - IAM isolation)
+  # ══════════════════════════════════════════════════════════════════════════════
+  ScopedRoleActorB:
+    Type: AWS::IAM::Role
+    DependsOn: MemoryWithSemantic
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-actor-B-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScopedMemoryAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: MemoryAccessScopedToActorB
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:GetEvent
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                Resource: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:memory/*'
+                Condition:
+                  StringEquals:
+                    bedrock-agentcore:actorId: user-B
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # AgentCore Memory: Short-term only (Demo 1)
+  # ══════════════════════════════════════════════════════════════════════════════
+  MemoryShortTermOnly:
+    Type: AWS::BedrockAgentCore::Memory
+    DependsOn: MemoryExecutionRole
+    Properties:
+      Name: !Sub '${MemoryNamePrefix}_StmOnly'
+      Description: 'Demo 1: Short-term memory only (no strategies)'
+      EventExpiryDuration: 7
+      MemoryExecutionRoleArn: !GetAtt MemoryExecutionRole.Arn
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # AgentCore Memory: With semantic strategy (Demo 2, 3, 4, 5)
+  # ══════════════════════════════════════════════════════════════════════════════
+  MemoryWithSemantic:
+    Type: AWS::BedrockAgentCore::Memory
+    DependsOn: MemoryExecutionRole
+    Properties:
+      Name: !Sub '${MemoryNamePrefix}_Semantic'
+      Description: 'Demos 2-5: Memory with semantic strategy'
+      EventExpiryDuration: 30
+      MemoryExecutionRoleArn: !GetAtt MemoryExecutionRole.Arn
+      MemoryStrategies:
+        - SemanticMemoryStrategy:
+            Name: UserFacts
+            Namespaces:
+              - '/users/{actorId}/facts/'
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # AgentCore Memory: With user preference strategy (Demo 3)
+  # ══════════════════════════════════════════════════════════════════════════════
+  MemoryWithUserPreference:
+    Type: AWS::BedrockAgentCore::Memory
+    DependsOn: MemoryExecutionRole
+    Properties:
+      Name: !Sub '${MemoryNamePrefix}_UserPref'
+      Description: 'Demo 3: Memory with user preference strategy'
+      EventExpiryDuration: 30
+      MemoryExecutionRoleArn: !GetAtt MemoryExecutionRole.Arn
+      MemoryStrategies:
+        - UserPreferenceMemoryStrategy:
+            Name: UserPreference
+            Namespaces:
+              - '/users/{actorId}'
+
+Outputs:
+  # ── General ──────────────────────────────────────────────────────────────────
+  CodeBucketName:
+    Description: S3 bucket for deployment packages
+    Value: !Ref CodeBucket
+
+  RuntimeExecutionRoleArn:
+    Description: IAM role ARN for AgentCore Runtime
+    Value: !GetAtt RuntimeExecutionRole.Arn
+
+  MemoryExecutionRoleArn:
+    Description: IAM role ARN for Memory extraction
+    Value: !GetAtt MemoryExecutionRole.Arn
+
+  Region:
+    Value: !Ref AWS::Region
+
+  # ── Memory Resources ─────────────────────────────────────────────────────────
+  MemoryShortTermOnlyId:
+    Description: Memory ID for Demo 1 (STM only)
+    Value: !GetAtt MemoryShortTermOnly.MemoryId
+
+  MemoryWithSemanticId:
+    Description: Memory ID for Demos 2, 4, 5 (semantic strategy)
+    Value: !GetAtt MemoryWithSemantic.MemoryId
+
+  MemoryWithUserPreferenceId:
+    Description: Memory ID for Demo 3 (user preference strategy)
+    Value: !GetAtt MemoryWithUserPreference.MemoryId
+
+  # ── Demo 5: Scoped Roles ────────────────────────────────────────────────────
+  ScopedRoleActorAArn:
+    Description: IAM role scoped to actorId=user-A
+    Value: !GetAtt ScopedRoleActorA.Arn
+
+  ScopedRoleActorBArn:
+    Description: IAM role scoped to actorId=user-B
+    Value: !GetAtt ScopedRoleActorB.Arn
