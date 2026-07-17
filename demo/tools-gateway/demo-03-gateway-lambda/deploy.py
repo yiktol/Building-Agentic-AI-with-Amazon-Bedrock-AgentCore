@@ -4,6 +4,9 @@ Demo 3: Create AgentCore Gateway + attach Lambda targets.
 Creates a gateway, attaches the Lambda functions from CFN as targets,
 then makes them available as MCP tools.
 
+Idempotent: if runtime_config.json exists and the gateway is still READY,
+the script skips creation and reports the existing state.
+
 Usage:
     python deploy.py
 """
@@ -20,21 +23,50 @@ from shared.colors import banner, step_header, section, success, info, error, co
 import boto3
 
 GATEWAY_NAME = f"demo03-gateway-{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(control, region):
+    """Check if a previously deployed gateway still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    gateway_id = config.get("gateway_id")
+    if not gateway_id:
+        return None
+    try:
+        gw = control.get_gateway(gatewayIdentifier=gateway_id)
+        if gw.get("status") == "READY":
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
 
+    control = boto3.client("bedrock-agentcore-control", region_name=cfg["region"])
+
     banner("Demo 3: AgentCore Gateway — Lambda Targets")
-    config_val("Gateway", GATEWAY_NAME)
     config_val("Region", cfg["region"])
 
-    control = boto3.client("bedrock-agentcore-control", region_name=cfg["region"])
+    # Check if gateway already exists
+    existing = check_existing(control, cfg["region"])
+    if existing:
+        success(f"Gateway already deployed: {existing['gateway_id']}")
+        config_val("Gateway URL", existing["gateway_url"])
+        config_val("Tools", "get_order, list_orders, get_weather, calculate")
+        done("python invoke.py")
+        return
+
+    config_val("Gateway", GATEWAY_NAME)
 
     # Step 1: Create gateway
     step_header(1, 3, "Creating AgentCore Gateway")
-    info("protocolType: MCP | authorizerType: NONE (for demo simplicity)")
+    info("protocolType: MCP | authorizerType: AWS_IAM")
 
     resp = control.create_gateway(
         name=GATEWAY_NAME,
@@ -96,26 +128,29 @@ def main():
     target_ids = []
     for t in targets:
         info(f"Attaching: {t['name']} → {t['lambda_arn'].split(':')[-1]}")
-        resp = control.create_gateway_target(
-            gatewayIdentifier=gateway_id,
-            name=t["name"],
-            targetConfiguration={
-                "mcp": {
-                    "lambda": {
-                        "lambdaArn": t["lambda_arn"],
-                        "toolSchema": {
-                            "inlinePayload": t["tools"],
-                        },
+        try:
+            resp = control.create_gateway_target(
+                gatewayIdentifier=gateway_id,
+                name=t["name"],
+                targetConfiguration={
+                    "mcp": {
+                        "lambda": {
+                            "lambdaArn": t["lambda_arn"],
+                            "toolSchema": {
+                                "inlinePayload": t["tools"],
+                            },
+                        }
                     }
-                }
-            },
-            credentialProviderConfigurations=[
-                {"credentialProviderType": "GATEWAY_IAM_ROLE"}
-            ],
-            description=f"Lambda target: {t['name']}",
-        )
-        target_ids.append(resp.get("targetId", t["name"]))
-        success(f"  Attached: {t['name']} ({len(t['tools'])} tools)")
+                },
+                credentialProviderConfigurations=[
+                    {"credentialProviderType": "GATEWAY_IAM_ROLE"}
+                ],
+                description=f"Lambda target: {t['name']}",
+            )
+            target_ids.append(resp.get("targetId", t["name"]))
+            success(f"  Attached: {t['name']} ({len(t['tools'])} tools)")
+        except control.exceptions.ConflictException:
+            success(f"  Already exists: {t['name']}")
 
     # Wait for targets to be ready
     step_header(3, 3, "Waiting for targets ACTIVE")
@@ -130,7 +165,7 @@ def main():
         "region": cfg["region"],
         "target_ids": target_ids,
     }
-    with open("runtime_config.json", "w") as f:
+    with open(CONFIG_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
     done("python invoke.py")

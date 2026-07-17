@@ -22,6 +22,26 @@ import boto3
 from botocore.exceptions import ClientError
 
 AGENT_NAME = f"demo01_mcp_server_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -29,6 +49,15 @@ def main():
     cfg = get_config()
 
     banner("Demo 1: MCP Server on AgentCore Runtime")
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
+
     config_val("Server", AGENT_NAME)
     config_val("Protocol", "MCP (port 8000, /mcp)")
     config_val("Region", cfg["region"])

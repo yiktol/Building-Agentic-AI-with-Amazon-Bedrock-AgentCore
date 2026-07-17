@@ -22,7 +22,7 @@ def get_stack_outputs(region: str = None) -> dict:
     Returns a dict mapping OutputKey -> OutputValue.
     """
     session = Session()
-    region = region or session.region_name or "us-east-1"
+    region = region or session.region_name or "ap-southeast-1"
     cfn = boto3.client("cloudformation", region_name=region)
 
     try:
@@ -44,7 +44,7 @@ def get_stack_outputs(region: str = None) -> dict:
 def get_config(region: str = None) -> dict:
     """Get full config dict from stack outputs."""
     session = Session()
-    region = region or session.region_name or "us-east-1"
+    region = region or session.region_name or "ap-southeast-1"
     account_id = session.client("sts").get_caller_identity()["Account"]
     outputs = get_stack_outputs(region)
 

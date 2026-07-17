@@ -18,7 +18,7 @@ def main():
     if os.path.exists("runtime_config.json"):
         with open("runtime_config.json") as f:
             config = json.load(f)
-        region = config.get("region", "us-east-1")
+        region = config.get("region", "ap-southeast-1")
         control = boto3.client("bedrock-agentcore-control", region_name=region)
         for name in ["m2m-provider", "google-3lo-provider"]:
             try:

@@ -130,6 +130,7 @@ python invoke.py               # Requires Demo 3 deployed
 - Built-in tool — no configuration needed on the gateway
 - Critical for production: reduces token usage and improves accuracy
 - Works across all target types (Lambda, OpenAPI, MCP servers)
+- **Note:** Semantic search index takes 5-10 minutes to build after gateway targets are attached. Deploy Demo 3 early and let the index build before showing Demo 4.
 
 ---
 
@@ -140,11 +141,13 @@ python invoke.py               # Requires Demo 3 deployed
 - Attaching to gateway in ENFORCE mode (default-deny)
 - Permitted tool call succeeds; denied tool call is blocked
 - `tools/list` only shows permitted tools
+- A Strands agent chatbot constrained by policy
 
 ```bash
 cd demo-05-cedar-policy
 python deploy.py               # Create policy engine + attach to Demo 3 gateway
-python invoke.py               # Test: allowed vs denied
+python invoke.py               # Test: allowed vs denied (scripted)
+python invoke_agent.py         # Interactive chatbot — agent constrained by policy
 python cleanup.py              # Remove policy engine
 ```
 
@@ -153,6 +156,8 @@ python cleanup.py              # Remove policy engine
 - Cedar language: `permit(principal, action, resource) when {...}`
 - Deterministic, auditable — not probabilistic like LLM guardrails
 - Principal tags from JWT claims enable ABAC (attribute-based access)
+- Agent receives clear denial message — no silent failures
+- `invoke_agent.py` shows a real agent trying to use tools — only weather works
 - Agent receives clear denial message — no silent failures
 - NL2Cedar: generate policies from plain English descriptions
 

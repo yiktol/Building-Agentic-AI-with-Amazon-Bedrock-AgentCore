@@ -18,7 +18,7 @@ def main():
         if os.path.exists("runtime_config.json"):
             with open("runtime_config.json") as f:
                 config = json.load(f)
-            control = boto3.client("bedrock-agentcore-control", region_name=config.get("region", "us-east-1"))
+            control = boto3.client("bedrock-agentcore-control", region_name=config.get("region", "ap-southeast-1"))
             control.delete_oauth2_credential_provider(name=config.get("provider_name", "github-provider"))
             success("Deleted GitHub credential provider")
     except Exception as e:

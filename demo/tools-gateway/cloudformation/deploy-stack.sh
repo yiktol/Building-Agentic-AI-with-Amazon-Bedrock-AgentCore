@@ -3,7 +3,7 @@ set -euo pipefail
 
 STACK_NAME="mlagac-m04-tools-gateway-prereqs"
 TEMPLATE_FILE="$(dirname "$0")/prerequisites.yaml"
-REGION="${1:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
+REGION="${1:-$(aws configure get region 2>/dev/null || echo 'ap-southeast-1')}"
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Deploying: ${STACK_NAME}"

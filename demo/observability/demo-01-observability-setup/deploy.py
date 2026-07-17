@@ -12,6 +12,7 @@ Usage:
     python deploy.py
 """
 
+import json
 import os
 import shutil
 import sys
@@ -27,11 +28,42 @@ from shared.deploy_helpers import (
 from shared.colors import banner, step_header, success, info, config_val, done
 
 AGENT_NAME = f"demo01_observe_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        import boto3
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        banner("Demo 1: Observability Setup — Deploy with OTel")
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        config_val("Log Group", existing["log_group"])
+        done("python invoke.py")
+        return
 
     banner("Demo 1: Observability Setup — Deploy with OTel")
     config_val("Agent", AGENT_NAME)

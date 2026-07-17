@@ -1,108 +1,125 @@
 """
-Demo 3: Strands Agent connected to the Gateway via MCP.
+Demo 3: Strands Agent with Gateway Tools — Interactive Chatbot.
 
-The agent discovers tools from the gateway at runtime and uses them
-to answer natural language questions.
+Connects a local Strands agent to the AgentCore Gateway via MCP
+(using mcp-proxy-for-aws). The agent discovers and uses gateway tools:
+  - get_order, list_orders (OrderService)
+  - get_weather (WeatherService)
+  - calculate (CalculatorService)
+
+Requires:
+    pip install strands-agents strands-agents-tools mcp-proxy-for-aws
 
 Usage:
-    python invoke_agent.py
-    python invoke_agent.py "What is the weather in Miami?"
+    python invoke_agent.py                          # Interactive chatbot
+    python invoke_agent.py "What's the weather in Tokyo?"  # Single prompt
 """
 
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from shared.colors import banner, section, success, info, config_val, prompt_display, response_display, done
+from shared.colors import (
+    banner, section, success, info, error, config_val, done,
+    prompt_display, response_display, GREEN, YELLOW, RED, RESET, BOLD, WHITE
+)
 
 from strands import Agent
 from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
-from mcp.client.streamable_http import streamablehttp_client
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session as BotocoreSession
+from mcp_proxy_for_aws.client import aws_iam_streamablehttp_client
 
 
-class SigV4StreamableHTTP:
-    """Wrapper that adds SigV4 signing to the MCP streamable-HTTP client."""
+def run_chatbot(agent):
+    """Interactive conversation loop with the gateway-connected agent."""
+    print(f"\n{BOLD}{WHITE}  Gateway Agent Chat{RESET}")
+    print(f"  Tools: get_order, list_orders, get_weather, calculate")
+    print(f"  Type 'quit' or 'exit' to stop.\n")
 
-    def __init__(self, gateway_url: str, region: str):
-        self.gateway_url = gateway_url
-        self.region = region
+    while True:
+        try:
+            user_input = input(f"  {GREEN}You:{RESET} ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
 
-    def get_headers(self) -> dict:
-        """Generate SigV4 signed headers for the gateway."""
-        session = BotocoreSession()
-        credentials = session.get_credentials().get_frozen_credentials()
-        request = AWSRequest(
-            method="POST", url=self.gateway_url, data="",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-        )
-        SigV4Auth(credentials, "bedrock-agentcore", self.region).add_auth(request)
-        return dict(request.headers)
+        if user_input.strip().lower() in ("quit", "exit", "q"):
+            break
+
+        if not user_input.strip():
+            continue
+
+        try:
+            response = agent(user_input)
+            text = response.message["content"][0]["text"]
+            text = re.sub(r"<thinking>.*?</thinking>\s*", "", text, flags=re.DOTALL).strip()
+            print(f"  {YELLOW}Agent:{RESET} {text}\n")
+        except Exception as e:
+            print(f"  {RED}Error:{RESET} {str(e)[:200]}\n")
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+    if not os.path.exists("runtime_config.json"):
+        error("runtime_config.json not found. Run deploy.py first.")
+        sys.exit(1)
+
     with open("runtime_config.json") as f:
         config = json.load(f)
 
     gateway_url = config["gateway_url"]
     region = config["region"]
 
-    if len(sys.argv) > 1:
-        prompts = [" ".join(sys.argv[1:])]
-    else:
-        prompts = [
-            "What is the weather in Tokyo?",
-            "Calculate 99 * 77 + 15",
-            "Show me order ORD-12345",
-        ]
-
-    banner("Demo 3: Strands Agent + Gateway MCP Tools")
+    banner("Demo 3: Gateway Agent (Interactive)")
     config_val("Gateway", gateway_url)
-    info("Agent discovers tools from gateway via MCP protocol")
+    config_val("Region", region)
 
-    # Connect to gateway as an MCP client
-    sigv4 = SigV4StreamableHTTP(gateway_url, region)
-    headers = sigv4.get_headers()
-
+    # Connect to gateway using SigV4-authenticated MCP client
     mcp_client = MCPClient(
-        lambda: streamablehttp_client(gateway_url, headers=headers)
+        lambda: aws_iam_streamablehttp_client(
+            endpoint=gateway_url,
+            aws_region=region,
+            aws_service="bedrock-agentcore",
+        )
     )
 
     with mcp_client:
-        # Get tools from gateway
+        # Discover available tools
         tools = mcp_client.list_tools_sync()
-        section("Tools discovered from gateway")
+        section("Discovered Gateway Tools")
         for t in tools:
-            name = t.name if hasattr(t, 'name') else str(t)
-            info(f"● {name}")
-        success(f"Agent has {len(tools)} tools available")
+            name = getattr(t, "tool_name", None) or getattr(t, "name", None) or str(t)
+            print(f"    {GREEN}\u25cf{RESET} {name}")
+        info(f"{len(tools)} tool(s) available")
 
-        # Create agent with gateway tools
-        model = BedrockModel(model_id="global.anthropic.claude-haiku-4-5-20251001-v1:0")
+        # Create agent
+        model = BedrockModel(model_id="apac.amazon.nova-lite-v1:0")
         agent = Agent(
             model=model,
             tools=tools,
-            system_prompt="You are a helpful assistant. Use the available tools to answer questions. Be concise.",
+            system_prompt=(
+                "You are a helpful assistant with access to order management, weather, "
+                "and calculator tools. Use the appropriate tool to answer questions. "
+                "Be concise and helpful."
+            ),
         )
 
-        # Invoke with prompts
-        for i, prompt in enumerate(prompts, 1):
-            section(f"Prompt {i}/{len(prompts)}")
+        # Single prompt or interactive mode
+        if len(sys.argv) > 1:
+            prompt = " ".join(sys.argv[1:])
+            section("Single prompt mode")
             prompt_display(prompt)
             response = agent(prompt)
             text = response.message["content"][0]["text"]
+            text = re.sub(r"<thinking>.*?</thinking>\s*", "", text, flags=re.DOTALL).strip()
             response_display(text)
+        else:
+            run_chatbot(agent)
 
     done()
-    info("Key: Agent discovers and uses gateway tools dynamically")
-    info("  • No hardcoded tool definitions in agent code")
-    info("  • Gateway handles routing to the correct Lambda")
-    print()
 
 
 if __name__ == "__main__":

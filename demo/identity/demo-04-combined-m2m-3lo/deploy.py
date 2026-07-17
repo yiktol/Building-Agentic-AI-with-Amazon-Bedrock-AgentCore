@@ -23,11 +23,41 @@ from shared.colors import banner, step_header, section, success, info, error, co
 import boto3
 
 AGENT_NAME = f"demo04_m2m_3lo_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
+
+    banner("Demo 4: Combined M2M + 3LO Outbound Auth")
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
 
     google_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")

@@ -21,11 +21,41 @@ from shared.colors import banner, step_header, success, info, error, config_val,
 
 AGENT_NAME = f"demo03_outbound_github_{int(time.time()) % 100000}"
 PROVIDER_NAME = "github-provider"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        import boto3
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        banner("Demo 3: Outbound Auth \u2014 GitHub 3LO")
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
 
     gh_id = os.environ.get("GITHUB_CLIENT_ID", "")
     gh_secret = os.environ.get("GITHUB_CLIENT_SECRET", "")

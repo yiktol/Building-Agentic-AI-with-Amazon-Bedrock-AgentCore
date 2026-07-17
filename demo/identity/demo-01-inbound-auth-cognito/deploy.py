@@ -4,6 +4,9 @@ Demo 1: Deploy agent with inbound JWT auth (Cognito).
 All AWS resources (Cognito, IAM, S3) come from the CloudFormation stack.
 This script only deploys the AgentCore Runtime with customJWTAuthorizer.
 
+Idempotent: if runtime_config.json exists and the runtime is still READY,
+the script skips creation and reports the existing state.
+
 Usage:
     python deploy.py
 """
@@ -18,7 +21,29 @@ from shared.stack_config import get_config
 from shared.deploy_helpers import build_and_upload, create_runtime
 from shared.colors import banner, step_header, success, info, config_val, done
 
+import boto3
+
 AGENT_NAME = f"demo01_inbound_auth_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -26,6 +51,15 @@ def main():
     cfg = get_config()
 
     banner("Demo 1: Inbound Auth — Cognito JWT")
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
+
     config_val("Agent", AGENT_NAME)
     config_val("Region", cfg["region"])
     config_val("Discovery URL", cfg["cognito_discovery_url"])

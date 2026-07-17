@@ -80,11 +80,25 @@ def main():
 
         err = result.get("error", {})
         if err:
-            info(f"Search unavailable: {err.get('message', str(err))[:200]}")
-            info("(Search may need more tools to index, or isn't available yet)")
+            msg = err.get("message", str(err))
+            if "InternalServerException" in msg or "internal" in msg.lower():
+                info("Search index is still building — try again in a few minutes")
+                info("(Semantic search needs time to index tools after gateway creation)")
+            else:
+                info(f"Search error: {msg[:200]}")
             continue
 
         content = result.get("result", {}).get("content", [])
+        is_error = result.get("result", {}).get("isError", False)
+        if is_error:
+            error_text = content[0].get("text", "") if content else "Unknown error"
+            if "InternalServerException" in error_text:
+                info("Search index is still building — try again in a few minutes")
+                info("(Semantic search needs time to index tools after gateway creation)")
+            else:
+                info(f"Search error: {error_text[:200]}")
+            continue
+
         if content:
             for c in content:
                 text = c.get("text", "")

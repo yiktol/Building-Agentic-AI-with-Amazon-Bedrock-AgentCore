@@ -21,6 +21,22 @@ import boto3
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+    # Check if already deployed
+    if os.path.exists("runtime_config.json"):
+        with open("runtime_config.json") as f:
+            existing = json.load(f)
+        # Verify policy engine still exists
+        try:
+            control = boto3.client("bedrock-agentcore-control", region_name=existing["region"])
+            pe = control.get_policy_engine(policyEngineId=existing["policy_engine_id"])
+            if pe.get("status") == "ACTIVE":
+                banner("Demo 5: Cedar Policy Engine")
+                success(f"Already deployed: {existing['policy_engine_id']}")
+                done("python invoke.py")
+                return
+        except Exception:
+            pass
+
     # Use Demo 3's gateway config
     gw_config_path = os.path.join("..", "demo-03-gateway-lambda", "runtime_config.json")
     if not os.path.exists(gw_config_path):
@@ -98,13 +114,16 @@ def main():
     info("Policy: Allow ONLY the get_weather tool")
     print(f"\n    {cedar_statement}\n")
 
-    control.create_policy(
-        policyEngineId=pe_id,
-        name="allow_weather_only",
-        definition={"cedar": {"statement": cedar_statement}},
-        validationMode="IGNORE_ALL_FINDINGS",
-    )
-    success("Policy created: allow-weather-only")
+    try:
+        control.create_policy(
+            policyEngineId=pe_id,
+            name="allow_weather_only",
+            definition={"cedar": {"statement": cedar_statement}},
+            validationMode="IGNORE_ALL_FINDINGS",
+        )
+        success("Policy created: allow-weather-only")
+    except control.exceptions.ConflictException:
+        success("Policy already exists: allow-weather-only")
     info("Now: get_weather → ALLOWED, all other tools → DENIED")
 
     # Save config

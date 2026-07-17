@@ -24,13 +24,44 @@ from shared.deploy_helpers import (
 from shared.colors import banner, step_header, success, info, config_val, done
 
 AGENT_NAME = f"demo03_mem_tool_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        import boto3
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
 
-    banner("Demo 3: Strands Agent — Memory as Tool")
+    banner("Demo 3: Strands Agent \u2014 Memory as Tool")
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        config_val("Memory ID", existing.get("memory_id", "N/A"))
+        done("python invoke.py")
+        return
+
     config_val("Agent", AGENT_NAME)
     config_val("Region", cfg["region"])
     config_val("Memory ID (UserPref)", cfg["memory_user_pref_id"])

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 STACK_NAME="mlagac-m04-tools-gateway-prereqs"
-REGION="${1:-$(aws configure get region 2>/dev/null || echo 'us-east-1')}"
+REGION="${1:-$(aws configure get region 2>/dev/null || echo 'ap-southeast-1')}"
 
 echo "═══════════════════════════════════════════════════════════"
 echo "  Deleting: ${STACK_NAME}"

@@ -22,11 +22,40 @@ import boto3
 
 AGENT_NAME = f"demo02_outbound_apikey_{int(time.time()) % 100000}"
 PROVIDER_NAME = "demo-apikey-provider"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cfg = get_config()
+
+    # Check if already deployed
+    existing = check_existing(cfg["region"])
+    if existing:
+        banner("Demo 2: Outbound Auth \u2014 API Key (Token Vault)")
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
 
     api_key = os.environ.get("DEMO_API_KEY", "")
     if not api_key:

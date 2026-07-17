@@ -90,6 +90,10 @@ def main():
 
     done()
     info("Key: Cedar policies = deterministic, auditable access control")
+    info("")
+    info("Try the interactive chatbot:")
+    info("  python invoke_agent.py")
+    info("  → Ask about weather (allowed) vs orders/math (denied)")
     print()
 
 

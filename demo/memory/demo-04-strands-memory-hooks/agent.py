@@ -25,7 +25,7 @@ MEMORY_ID = os.environ["MEMORY_ID"]
 ACTOR_ID = os.environ.get("ACTOR_ID", "user-42")
 SESSION_ID = os.environ.get("SESSION_ID", "session-hooks-1")
 NAMESPACE = os.environ.get("MEMORY_NAMESPACE", f"/users/{ACTOR_ID}")
-REGION = os.environ.get("AWS_REGION", "us-east-1")
+REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
 
 
 class MemoryHooks(HookProvider):

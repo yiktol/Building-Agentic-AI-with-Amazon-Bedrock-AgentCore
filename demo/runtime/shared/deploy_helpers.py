@@ -33,7 +33,7 @@ from boto3.session import Session
 def get_aws_context():
     """Get region and account ID from the current AWS session."""
     session = Session()
-    region = session.region_name or "us-east-1"
+    region = session.region_name or "ap-southeast-1"
     account_id = session.client("sts").get_caller_identity()["Account"]
     return region, account_id
 

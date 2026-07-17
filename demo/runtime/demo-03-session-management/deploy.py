@@ -3,10 +3,14 @@ Demo 3: Deploy session-aware agent with extended idle timeout.
 
 Sets idleRuntimeSessionTimeout to 1800s (30 min) for demo purposes.
 
+Idempotent: if runtime_config.json exists and the runtime is still READY,
+the script skips creation and reports the existing state.
+
 Usage:
     python deploy.py
 """
 
+import json
 import os
 import sys
 import time
@@ -22,7 +26,29 @@ from shared.deploy_helpers import (
 )
 from shared.colors import banner, step_header, success, info, config_val, done
 
+import boto3
+
 AGENT_NAME = f"demo03_session_mgmt_{int(time.time()) % 100000}"
+CONFIG_FILE = "runtime_config.json"
+
+
+def check_existing(region):
+    """Check if a previously deployed runtime still exists and is READY."""
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+    runtime_id = config.get("runtime_id")
+    if not runtime_id:
+        return None
+    try:
+        control = boto3.client("bedrock-agentcore-control", region_name=region)
+        resp = control.get_agent_runtime(agentRuntimeId=runtime_id)
+        if resp.get("status") in ("READY", "ACTIVE"):
+            return config
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -30,6 +56,15 @@ def main():
     region, account_id = get_aws_context()
 
     banner("Demo 3: Session Management → microVM Isolation")
+
+    # Check if already deployed
+    existing = check_existing(region)
+    if existing:
+        success(f"Already deployed: {existing['runtime_id']}")
+        config_val("Runtime ARN", existing["runtime_arn"])
+        done("python invoke.py")
+        return
+
     config_val("Agent", AGENT_NAME)
     config_val("Region", region)
     config_val("Idle Timeout", "1800s (30 min)")
