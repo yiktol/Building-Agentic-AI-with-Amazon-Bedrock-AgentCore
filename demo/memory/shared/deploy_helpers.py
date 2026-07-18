@@ -271,29 +271,36 @@ def build_and_upload_package(
     account_id: str,
     agent_files: list,
     requirements_file: str = "requirements.txt",
+    s3_bucket: str = None,
 ) -> str:
     """Build arm64 deployment package with uv and upload to S3.
+
+    Args:
+        s3_bucket: Use this bucket (from CFN stack). If None, creates one.
 
     Returns the S3 bucket name.
     """
     s3 = boto3.client("s3", region_name=region)
-    bucket = f"agentcore-code-{account_id}-{region}"
+    bucket = s3_bucket or f"agentcore-code-{account_id}-{region}"
     s3_key = f"{agent_name}/code.zip"
     pkg_dir = "deployment_package"
     zip_file = "deployment_package.zip"
 
-    # Create S3 bucket if needed
-    try:
-        if region == "us-east-1":
-            s3.create_bucket(Bucket=bucket)
-        else:
-            s3.create_bucket(
-                Bucket=bucket,
-                CreateBucketConfiguration={"LocationConstraint": region},
-            )
-        print(f"  ✓ Created S3 bucket: {bucket}")
-    except (s3.exceptions.BucketAlreadyOwnedByYou, s3.exceptions.BucketAlreadyExists):
-        print(f"  ✓ S3 bucket exists: {bucket}")
+    if not s3_bucket:
+        # Create S3 bucket only if not provided by CFN
+        try:
+            if region == "us-east-1":
+                s3.create_bucket(Bucket=bucket)
+            else:
+                s3.create_bucket(
+                    Bucket=bucket,
+                    CreateBucketConfiguration={"LocationConstraint": region},
+                )
+            print(f"  ✓ Created S3 bucket: {bucket}")
+        except (s3.exceptions.BucketAlreadyOwnedByYou, s3.exceptions.BucketAlreadyExists):
+            print(f"  ✓ S3 bucket exists: {bucket}")
+    else:
+        print(f"  ✓ Using CFN bucket: {bucket}")
 
     # Clean previous build
     if os.path.isdir(pkg_dir):

@@ -1,59 +1,14 @@
 """
-Demo 3: Strands Agent with Memory as Tool.
+Demo 3: Memory as Tool — Agent Code Reference.
 
-This agent demonstrates:
-- AgentCoreMemoryToolProvider gives the agent explicit memory read/write tools
-- The LLM decides WHEN to recall/save information
-- Memory operations exposed as tools the agent invokes deliberately
+This file shows what a deployed agent with AgentCoreMemoryToolProvider
+would look like. In this demo, we run the agent LOCALLY via invoke.py
+and invoke_agent.py to avoid runtime init timeout issues.
 
-The memory_id, actor_id, session_id, and namespace are injected via
-environment variables at deploy time.
+For a deployed version, see the temp/agentcore-samples reference:
+  01-features/04-manage-context-of-your-agent/memory/01-short-term-memory/
+  examples/single-agent/with-strands-agent/
 """
 
-import os
-
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
-from strands import Agent
-from strands.models.bedrock import BedrockModel
-from strands_tools.agent_core_memory import AgentCoreMemoryToolProvider
-
-# Configuration from environment (set by deploy.py)
-MEMORY_ID = os.environ["MEMORY_ID"]
-ACTOR_ID = os.environ.get("ACTOR_ID", "user-42")
-SESSION_ID = os.environ.get("SESSION_ID", "session-1")
-NAMESPACE = os.environ.get("MEMORY_NAMESPACE", f"/users/{ACTOR_ID}")
-REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-
-# Memory tool provider — gives the agent read/write memory tools
-memory_provider = AgentCoreMemoryToolProvider(
-    memory_id=MEMORY_ID,
-    actor_id=ACTOR_ID,
-    session_id=SESSION_ID,
-    namespace=NAMESPACE,
-    region=REGION,
-)
-
-model = BedrockModel(model_id="global.anthropic.claude-haiku-4-5-20251001-v1:0")
-agent = Agent(
-    model=model,
-    tools=memory_provider.tools,
-    system_prompt=(
-        "You are a helpful assistant with persistent memory. "
-        "Use your memory tools to save important user preferences and facts. "
-        "When users ask about previous conversations, use memory to recall. "
-        "Be concise."
-    ),
-)
-
-app = BedrockAgentCoreApp()
-
-
-@app.entrypoint
-def invoke_agent(payload: dict) -> str:
-    prompt = payload.get("prompt", "Hello!")
-    response = agent(prompt)
-    return response.message["content"][0]["text"]
-
-
-if __name__ == "__main__":
-    app.run()
+# The local agent implementation is in invoke.py and invoke_agent.py.
+# They use custom @tool functions (remember, recall) backed by MemoryClient.

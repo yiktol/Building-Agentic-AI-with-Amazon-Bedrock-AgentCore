@@ -9,6 +9,7 @@ Instructor-led demonstrations for the Machine Learning & AI on AWS: Generative A
 | Module 04 | [`tools-gateway/`](tools-gateway/) | Tool Integration and AgentCore Gateway |
 | Module 05 | [`memory/`](memory/) | AgentCore Memory — Short-Term, Long-Term, and Security |
 | Module 06 | [`observability/`](observability/) | Production Monitoring, Observability, and Evaluations |
+| Module 07 | [`harness/`](harness/) | AgentCore Harness — Managed Agent Loop (Zero Code) |
 
 See the module-specific README for step-by-step instructions.
 

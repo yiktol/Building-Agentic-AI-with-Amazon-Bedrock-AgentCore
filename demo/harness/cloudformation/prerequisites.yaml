@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Module 07 Harness Demo Prerequisites - IAM execution role.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: mlagac-m07-demo
+
+Resources:
+  HarnessExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectPrefix}-harness-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: HarnessPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BedrockInvoke
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: '*'
+              - Sid: ECR
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetAuthorizationToken
+                  - ecr-public:GetAuthorizationToken
+                  - sts:GetServiceBearerToken
+                Resource: '*'
+              - Sid: Observability
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+              - Sid: AgentCoreIntegrations
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:*
+                Resource: '*'
+
+Outputs:
+  HarnessExecutionRoleArn:
+    Description: IAM role ARN for harness execution
+    Value: !GetAtt HarnessExecutionRole.Arn
+  Region:
+    Value: !Ref AWS::Region

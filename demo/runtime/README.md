@@ -47,12 +47,18 @@ source venv/bin/activate
 pip install boto3 bedrock-agentcore strands-agents strands-agents-tools uv
 ```
 
+### Set your AWS region
+
+```bash
+export AWS_DEFAULT_REGION=ap-southeast-1
+```
+
 ### AWS Account Requirements
 
 - Access to **Amazon Bedrock AgentCore** in your region
 - Access to **Amazon Bedrock models** (Claude Haiku 4.5)
 - IAM permissions to create roles, S3 buckets, and AgentCore runtimes
-- Recommended region: `us-east-1` or `us-west-2`
+- Recommended region: `ap-southeast-1`, `us-east-1`, or `us-west-2`
 
 ### (Optional) Deploy CloudFormation Prerequisites
 
@@ -75,6 +81,7 @@ aws cloudformation deploy \
 
 > **Note:** The demo scripts create their own IAM roles and S3 buckets dynamically.
 > The CloudFormation stack is optional — for locked-down environments only.
+> If the stack fails (resource conflicts from prior runs), just skip it — demos work without it.
 
 ---
 

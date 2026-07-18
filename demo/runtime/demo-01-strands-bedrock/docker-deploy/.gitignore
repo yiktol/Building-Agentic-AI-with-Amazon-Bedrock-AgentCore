@@ -1,0 +1,21 @@
+# AgentCore CLI auto-generated files
+agentcore/.cli/
+agentcore/cdk/
+agentcore/cdk.out/
+agentcore/.env.local
+agentcore/state/
+
+# Python virtual environment (created by agentcore create)
+app/StrandsDemo/.venv/
+app/StrandsDemo/__pycache__/
+
+# Node modules (CDK)
+node_modules/
+
+# Lock files that may change
+app/StrandsDemo/uv.lock
+
+# Build artifacts
+cdk.out/
+*.js
+*.d.ts

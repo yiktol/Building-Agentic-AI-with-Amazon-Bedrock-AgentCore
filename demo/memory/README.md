@@ -33,14 +33,13 @@ To regenerate: `cd diagrams && python generate_diagrams.py`
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Python | 3.12+ | Scripts and agent code |
-| [uv](https://docs.astral.sh/uv/getting-started/installation/) | latest | Build arm64 packages (Demos 3-4) |
 | AWS CLI | v2 | Configured with credentials |
 | boto3 | ≥1.38.0 | AWS SDK |
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install boto3 bedrock-agentcore strands-agents strands-agents-tools uv
+pip install boto3 bedrock-agentcore strands-agents strands-agents-tools
 ```
 
 ### Set your AWS region
@@ -67,7 +66,7 @@ cd cloudformation
 ```
 
 This creates:
-- S3 bucket for agent code (Demos 3-4)
+- S3 bucket for agent code
 - IAM runtime execution role (with Memory + Bedrock permissions)
 - IAM memory execution role (for strategy extraction pipeline)
 - IAM scoped roles for user-A and user-B (Demo 5)
@@ -75,8 +74,8 @@ This creates:
 - AgentCore Memory resource: with semantic strategy (Demos 2, 4, 5)
 - AgentCore Memory resource: with user preference strategy (Demo 3)
 
-> **Note:** Demo scripts only deploy/invoke/cleanup AgentCore Runtimes (Demos 3-4).
-> All other resources are managed by the stack.
+> **Note:** Demos 3-4 run locally (no runtime deployment needed).
+> All AWS resources are managed by the CloudFormation stack.
 
 ---
 
@@ -141,9 +140,9 @@ python cleanup.py     # Delete memory + IAM roles
 
 ```bash
 cd demo-03-strands-memory-tools
-python deploy.py      # Create memory + deploy Strands agent to Runtime
-python invoke.py      # Multi-turn: save preferences → recall them
-python cleanup.py     # Delete runtime + memory + IAM roles
+python deploy.py      # Verify memory resource is active (no runtime needed)
+python invoke.py      # Scripted demo: save + recall (runs locally)
+python invoke_agent.py # Interactive chatbot with memory tools
 ```
 
 **Talking points:**
@@ -152,6 +151,7 @@ python cleanup.py     # Delete runtime + memory + IAM roles
 - Good for: selective storage, complex recall queries, debugging
 - Compare with Demo 4: tool = explicit; hook = automatic
 - User preference strategy captures patterns in behavior/choices
+- Runs locally — no runtime deployment delays, no 30s init timeout
 
 ---
 
@@ -165,9 +165,9 @@ python cleanup.py     # Delete runtime + memory + IAM roles
 
 ```bash
 cd demo-04-strands-memory-hooks
-python deploy.py      # Create memory + deploy agent with hooks
-python invoke.py      # Conversation auto-saved/retrieved by hooks
-python cleanup.py     # Delete runtime + memory + IAM roles
+python deploy.py      # Verify memory resource is active (no runtime needed)
+python invoke.py      # Scripted demo: save + recall (runs locally)
+python invoke_agent.py # Interactive chatbot with memory hooks
 ```
 
 **Talking points:**
@@ -177,6 +177,7 @@ python cleanup.py     # Delete runtime + memory + IAM roles
 - Good for: standard save/retrieve lifecycle, consistent behavior
 - Graceful degradation: memory failure never breaks the agent turn
 - Three Strands patterns: built-in hook, custom hook, memory-as-tool
+- Runs locally — hooks simulated with explicit SDK calls before/after each turn
 
 ---
 
@@ -227,11 +228,11 @@ Deploy the stack (creates all AWS resources):
 cd cloudformation && ./deploy-stack.sh
 ```
 
-Deploy Runtimes for Demos 3-4 (takes ~5 min each):
+Verify resources for Demos 3-4 (runs locally, no runtime needed):
 
 ```bash
 for d in demo-03-strands-memory-tools demo-04-strands-memory-hooks; do
-  echo "=== Deploying $d ==="
+  echo "=== Verifying $d ==="
   (cd "$d" && python deploy.py)
 done
 ```
@@ -242,12 +243,12 @@ Seed data for Demo 5:
 (cd demo-05-iam-scoped-access && python deploy.py)
 ```
 
-Clean up runtimes only (memory stays in stack):
+Clean up Demos 3-4 (no-op since they run locally; memory stays in stack):
 
 ```bash
 for d in demo-03-strands-memory-tools demo-04-strands-memory-hooks; do
   echo "=== Cleaning $d ==="
-  (cd "$d" && python cleanup.py 2>/dev/null)
+  (cd "$d" && python cleanup.py)
 done
 ```
 
@@ -261,13 +262,13 @@ cd cloudformation && ./cleanup-stack.sh
 
 ## Architecture
 
-All AWS resources are provisioned via CloudFormation. Demo scripts only deploy/invoke/cleanup AgentCore Runtimes (Demos 3-4).
+All AWS resources are provisioned via CloudFormation. Demos 3-4 run locally (no runtime deployment needed).
 
 ```
 1. Deploy CFN stack (creates Memory resources, IAM roles, S3)
-2. python deploy.py   (verifies resources; Demos 3-4 deploy runtime)
-3. python invoke.py   (exercises memory operations)
-4. python cleanup.py  (Demos 3-4 delete runtime; memory stays in stack)
+2. python deploy.py   (verifies resources are ACTIVE)
+3. python invoke.py   (exercises memory operations — Demos 3-4 run locally)
+4. python cleanup.py  (no-op for Demos 3-4; memory stays in stack)
 5. Delete CFN stack when done with all demos
 ```
 
@@ -310,18 +311,20 @@ demo/memory/
 │   ├── invoke.py                     ← Write → wait → retrieve records
 │   └── cleanup.py
 ├── demo-03-strands-memory-tools/
-│   ├── agent.py                      ← Strands + AgentCoreMemoryToolProvider
+│   ├── agent.py                      ← Reference only (runs locally)
 │   ├── requirements.txt
 │   ├── local_test.py
-│   ├── deploy.py                     ← Creates memory + deploys runtime
-│   ├── invoke.py                     ← Multi-turn preference save/recall
+│   ├── deploy.py                     ← Verifies memory resource is ACTIVE
+│   ├── invoke.py                     ← Scripted demo: save + recall (local)
+│   ├── invoke_agent.py               ← Interactive chatbot (local)
 │   └── cleanup.py
 ├── demo-04-strands-memory-hooks/
-│   ├── agent.py                      ← Strands + HookProvider
+│   ├── agent.py                      ← Reference only (runs locally)
 │   ├── requirements.txt
 │   ├── local_test.py
-│   ├── deploy.py                     ← Creates memory + deploys runtime
-│   ├── invoke.py                     ← Auto save/retrieve via hooks
+│   ├── deploy.py                     ← Verifies memory resource is ACTIVE
+│   ├── invoke.py                     ← Scripted demo: hooks (local)
+│   ├── invoke_agent.py               ← Interactive chatbot (local)
 │   └── cleanup.py
 └── demo-05-iam-scoped-access/
     ├── agent.py                      ← Not deployed (SDK-only demo)
@@ -343,4 +346,3 @@ demo/memory/
 | `ThrottledException` | Back off and retry; request quota increase if sustained |
 | `ServiceQuotaExceededException` | Request quota increase in Service Quotas console |
 | Memory execution role errors | Role needs `bedrock:InvokeModel` for extraction strategies |
-| `uv: command not found` | Install uv: `pip install uv` |

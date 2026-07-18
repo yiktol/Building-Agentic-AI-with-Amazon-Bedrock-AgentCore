@@ -173,6 +173,8 @@ python cleanup.py              # Remove policy engine
 
 **Total:** ~21 minutes
 
+> **Important:** Run Demo 4 BEFORE Demo 5. Demo 5 attaches a Cedar policy (ENFORCE mode) that restricts tool visibility on the gateway. If Demo 5 is deployed, Demo 4's semantic search only sees 1 tool. Clean up Demo 5 before re-running Demo 4.
+
 ---
 
 ## Cleanup

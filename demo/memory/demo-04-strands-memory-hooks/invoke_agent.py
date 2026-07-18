@@ -1,69 +1,43 @@
 """
-Demo 4: Interactive Agent with Memory Hooks — Chatbot.
+Demo 4: Interactive Agent with Memory Hooks — Local Chatbot.
 
-Talks to the deployed hooks-based memory agent, demonstrating that memory
-persists automatically without explicit tool calls. The agent hooks fire:
-  - MessageAdded → retrieves relevant memories
-  - AfterInvocation → saves new information to memory
+Runs a local Strands agent with automatic memory hooks:
+  - Before each response: retrieve relevant context from STM + LTM
+  - After each response: save the turn to STM
 
-Memory is transparent — the agent doesn't need to "remember" explicitly.
-Just have a conversation and it automatically builds context over time.
+Memory is transparent — the agent doesn't need to call tools explicitly.
+Just have a conversation and context builds automatically.
 
 Usage:
     python invoke_agent.py                      # Interactive chatbot
     python invoke_agent.py "My name is Alice"   # Single prompt
 """
 
+import contextlib
+import io
 import json
 import os
-import re
 import sys
-import uuid
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from shared.stack_config import get_config
 from shared.colors import (
     banner, section, success, info, config_val, done,
-    prompt_display, response_display, GREEN, YELLOW, RED, RESET, BOLD, WHITE
+    prompt_display, response_display, GREEN, YELLOW, RED, DIM, RESET, BOLD, WHITE
 )
 
-import boto3
+from bedrock_agentcore.memory import MemoryClient
+from strands import Agent
+from strands.models.bedrock import BedrockModel
 
 
-def parse_sse_response(raw: str) -> str:
-    """Parse SSE streaming response into clean text."""
-    parts = []
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            chunk = line[len("data: "):]
-            if chunk.startswith('"') and chunk.endswith('"'):
-                chunk = chunk[1:-1]
-            parts.append(chunk)
-    text = "".join(parts) if parts else raw
-    # Strip thinking tags
-    text = re.sub(r"<thinking>.*?</thinking>\s*", "", text, flags=re.DOTALL).strip()
-    return text
-
-
-def invoke(runtime_arn, prompt, region, session_id=None):
-    """Send a prompt to the deployed hooks-based memory agent."""
-    client = boto3.client("bedrock-agentcore", region_name=region)
-    params = dict(
-        agentRuntimeArn=runtime_arn,
-        payload=json.dumps({"prompt": prompt}).encode("utf-8"),
-    )
-    if session_id:
-        params["runtimeSessionId"] = session_id
-    resp = client.invoke_agent_runtime(**params)
-    return parse_sse_response(resp["response"].read().decode("utf-8"))
-
-
-def run_chatbot(runtime_arn, region, session_id):
-    """Interactive conversation loop demonstrating automatic memory hooks."""
+def run_chatbot(agent, memory_client, memory_id, actor_id, session_id, namespace):
+    """Interactive chatbot with automatic memory hooks."""
     print(f"\n{BOLD}{WHITE}  Memory Hooks Agent Chat{RESET}")
     print(f"  Memory is automatic — no explicit 'remember' commands needed.")
-    print(f"  Just chat naturally. The agent builds context over time.")
-    print(f"  Try: 'I work at Acme Corp' then later 'Where do I work?'")
-    print(f"  Type 'quit' or 'exit' to stop.\n")
+    print(f"  Just chat naturally. Context builds over turns.")
+    print(f"  Type 'quit' to stop.\n")
 
     while True:
         try:
@@ -78,45 +52,111 @@ def run_chatbot(runtime_arn, region, session_id):
         if not user_input.strip():
             continue
 
+        # HOOK: MessageAdded → retrieve context
+        memories = memory_client.retrieve_memories(
+            memory_id=memory_id,
+            namespace=namespace,
+            query=user_input,
+            top_k=3,
+        )
+        turns = memory_client.get_last_k_turns(
+            memory_id=memory_id,
+            actor_id=actor_id,
+            session_id=session_id,
+            k=5,
+        )
+
+        context_parts = []
+        if memories:
+            context_parts.append("Known facts:\n" + "\n".join(f"- {m['content']['text']}" for m in memories))
+        if turns:
+            stm_msgs = []
+            for turn in turns:
+                for msg in turn:
+                    stm_msgs.append(f"{msg['role']}: {msg['content']['text']}")
+            context_parts.append("Recent conversation:\n" + "\n".join(stm_msgs[-6:]))
+
+        if context_parts:
+            retrieved = len(memories) + len(turns)
+            print(f"  {DIM}[hook: retrieved {retrieved} record(s)]{RESET}")
+            full_prompt = "\n".join(context_parts) + f"\n\nUser: {user_input}\n\nRespond concisely."
+        else:
+            full_prompt = user_input
+
         try:
-            response = invoke(runtime_arn, user_input, region, session_id)
-            print(f"  {YELLOW}Agent:{RESET} {response}\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                response = agent(full_prompt)
+            agent_text = response.message["content"][0]["text"]
+            print(f"  {YELLOW}Agent:{RESET} {agent_text}")
         except Exception as e:
-            print(f"  {RED}Error:{RESET} {str(e)[:200]}\n")
+            agent_text = f"Error: {str(e)[:150]}"
+            print(f"  {RED}Agent:{RESET} {agent_text}")
+
+        # HOOK: AfterInvocation → save turn to STM
+        memory_client.create_event(
+            memory_id=memory_id,
+            actor_id=actor_id,
+            session_id=session_id,
+            messages=[
+                (user_input, "USER"),
+                (agent_text, "ASSISTANT"),
+            ],
+        )
+        print(f"  {DIM}[hook: saved to STM]{RESET}\n")
 
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    cfg = get_config()
+    memory_id = cfg["memory_semantic_id"]
+    region = cfg["region"]
 
-    if not os.path.exists("runtime_config.json"):
-        from shared.colors import error
-        error("runtime_config.json not found. Run deploy.py first.")
-        sys.exit(1)
-
-    with open("runtime_config.json") as f:
-        config = json.load(f)
-
-    runtime_arn = config["runtime_arn"]
-    region = config["region"]
-    memory_id = config.get("memory_id", "N/A")
-    session_id = str(uuid.uuid4())
+    actor_id = input(f"  Enter actor ID [{GREEN}user-42{RESET}]: ").strip() or "user-42"
+    session_id = f"sess-{int(time.time())}"
+    namespace = f"/users/{actor_id}/facts/"
 
     banner("Demo 4: Memory Hooks Agent (Interactive)")
-    config_val("Runtime ARN", runtime_arn)
     config_val("Memory ID", memory_id)
+    config_val("Actor", actor_id)
     config_val("Session", session_id)
-    info("Hooks: MessageAdded \u2192 retrieve | AfterInvocation \u2192 save")
+    info("Hooks: MessageAdded → retrieve | AfterInvocation → save")
+
+    memory_client = MemoryClient(region_name=region)
+
+    model = BedrockModel(
+        model_id="apac.amazon.nova-lite-v1:0",
+        region_name=region,
+    )
+    agent = Agent(
+        model=model,
+        system_prompt=(
+            "You are a helpful assistant. Be concise and friendly. "
+            "Use the conversation context provided to personalize responses."
+        ),
+    )
 
     if len(sys.argv) > 1:
         prompt = " ".join(sys.argv[1:])
         section("Single prompt mode")
         prompt_display(prompt)
-        response = invoke(runtime_arn, prompt, region, session_id)
-        response_display(response)
+        with contextlib.redirect_stdout(io.StringIO()):
+            response = agent(prompt)
+        response_display(response.message["content"][0]["text"])
+        memory_client.create_event(
+            memory_id=memory_id,
+            actor_id=actor_id,
+            session_id=session_id,
+            messages=[(prompt, "USER"), (response.message["content"][0]["text"], "ASSISTANT")],
+        )
     else:
-        run_chatbot(runtime_arn, region, session_id)
+        run_chatbot(agent, memory_client, memory_id, actor_id, session_id, namespace)
 
     done()
+    info("Key: Hooks fire transparently — no explicit memory tool calls")
+    info("  • MessageAdded → retrieve STM + LTM context")
+    info("  • AfterInvocation → save turn to STM")
+    info("  • Compare with Demo 3: tool = explicit; hook = automatic")
+    print()
 
 
 if __name__ == "__main__":
