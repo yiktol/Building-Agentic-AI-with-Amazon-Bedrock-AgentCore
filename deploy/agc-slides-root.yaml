@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Building Agentic AI with Amazon Bedrock AgentCore - Slides Pipeline - Root
+  stack. Deploys a private S3 content bucket and a CloudFront distribution that
+  serves the generated static Web_Viewer (the slides/ reveal.js app) at the site
+  root. There is no application backend and no EC2/ALB - the origin is the S3
+  bucket, reached privately via CloudFront Origin Access Control. Shared_Config
+  (staging bucket, domain, WAF Web ACL ARN, ACM certificate id) is resolved from
+  SSM Parameter Store, the same way the other demo stacks in this account/region
+  resolve it. All resource names derive from ProjectPrefix (default agc) so this
+  stack coexists with the aibs-slides and aws-sec-slides deployments in the same
+  account/region without collisions.
+
+Parameters:
+  Prefix:
+    Type: String
+    Description: S3 key prefix where the nested templates are staged
+
+  BucketRegion:
+    Type: String
+    Description: Region where the S3 bucket for CloudFormation templates exists
+
+  ParameterPrefix:
+    Type: String
+    Description: SSM Parameter Store prefix for shared configuration
+    Default: /genai/cognito
+
+  ProjectPrefix:
+    Type: String
+    Description: Prefix for all resource names to avoid conflicts across projects
+    Default: agc
+
+  OriginSecret:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Shared secret CloudFront injects as x-origin-secret toward the judge
+      Lambda, which rejects mismatches. Supply a random value at deploy time.
+
+  JudgeModelId:
+    Type: String
+    Description: Bedrock model (inference profile) id used by the AI judge
+    Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+  JudgeDistributionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the existing CloudFront distribution, used to scope the judge
+      Lambda's resource policy to that exact distribution (aws:SourceArn).
+      Supplied by the deploy script after the distribution id is known.
+
+Resources:
+  # Lambda function to retrieve SSM parameters (shared config lives under ParameterPrefix)
+  SSMParameterReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterPrefix}/*'
+
+  SSMParameterReaderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt SSMParameterReaderRole.Arn
+      Timeout: 30
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          ssm = boto3.client('ssm')
+
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Delete':
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  parameter_name = event['ResourceProperties']['ParameterName']
+                  with_decryption = event['ResourceProperties'].get('WithDecryption', 'true').lower() == 'true'
+
+                  response = ssm.get_parameter(
+                      Name=parameter_name,
+                      WithDecryption=with_decryption
+                  )
+
+                  value = response['Parameter']['Value']
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                      'Value': value
+                  })
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {
+                      'Error': str(e)
+                  })
+
+  # Retrieve Shared_Config from SSM (same account/region as other demo stacks):
+  # BucketName, DomainName, WebApplicationFirewallACLArn, CertificateId.
+  BucketNameParam:
+    Type: Custom::SSMParameter
+    Properties:
+      ServiceToken: !GetAtt SSMParameterReaderFunction.Arn
+      ParameterName: !Sub '${ParameterPrefix}/BucketName'
+      WithDecryption: false
+
+  DomainNameParam:
+    Type: Custom::SSMParameter
+    Properties:
+      ServiceToken: !GetAtt SSMParameterReaderFunction.Arn
+      ParameterName: !Sub '${ParameterPrefix}/DomainName'
+      WithDecryption: false
+
+  WebApplicationFirewallACLArnParam:
+    Type: Custom::SSMParameter
+    Properties:
+      ServiceToken: !GetAtt SSMParameterReaderFunction.Arn
+      ParameterName: !Sub '${ParameterPrefix}/WebApplicationFirewallACLArn'
+      WithDecryption: false
+
+  CertificateIdParam:
+    Type: Custom::SSMParameter
+    Properties:
+      ServiceToken: !GetAtt SSMParameterReaderFunction.Arn
+      ParameterName: !Sub '${ParameterPrefix}/CertificateId'
+      WithDecryption: false
+
+  # Private S3 content bucket (the CloudFront origin) - nested by S3 URL.
+  ContentBucketStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${Bucket}.s3.${BucketRegion}.amazonaws.com/${Prefix}/s3.yaml'
+        - Bucket: !GetAtt BucketNameParam.Value
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectPrefix}-ContentBucketStack'
+
+  # AI judge backend: Lambda + IAM-auth Function URL - nested by S3 URL.
+  JudgeStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${Bucket}.s3.${BucketRegion}.amazonaws.com/${Prefix}/judge.yaml'
+        - Bucket: !GetAtt BucketNameParam.Value
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        JudgeModelId: !Ref JudgeModelId
+        OriginSecret: !Ref OriginSecret
+        CloudFrontDistributionArn: !Ref JudgeDistributionArn
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectPrefix}-JudgeStack'
+
+  # CloudFront distribution + OAC + bucket policy + Route53 alias - nested by S3 URL.
+  CloudFrontDistributionStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${Bucket}.s3.${BucketRegion}.amazonaws.com/${Prefix}/cloudfront.yaml'
+        - Bucket: !GetAtt BucketNameParam.Value
+      Parameters:
+        DomainName: !GetAtt DomainNameParam.Value
+        WebApplicationFirewallACLArn: !GetAtt WebApplicationFirewallACLArnParam.Value
+        CertificateId: !GetAtt CertificateIdParam.Value
+        ProjectPrefix: !Ref ProjectPrefix
+        ContentBucketName: !GetAtt ContentBucketStack.Outputs.ContentBucketName
+        ContentBucketDomainName: !GetAtt ContentBucketStack.Outputs.ContentBucketDomainName
+        JudgeFunctionUrlDomain: !GetAtt JudgeStack.Outputs.JudgeFunctionUrlDomain
+        OriginSecret: !Ref OriginSecret
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectPrefix}-CloudFrontStack'
+
+Outputs:
+  ContentBucketName:
+    Description: Name of the S3 content bucket (publish Web_Viewer here with `aws s3 sync`)
+    Value: !GetAtt ContentBucketStack.Outputs.ContentBucketName
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution id (use for cache invalidations)
+    Value: !GetAtt CloudFrontDistributionStack.Outputs.CloudFrontDistributionId
+
+  CloudFrontURL:
+    Description: CloudFront distribution URL
+    Value: !GetAtt CloudFrontDistributionStack.Outputs.CloudFrontDistributionURL
+
+  CloudFrontLogBucketName:
+    Description: Name of the S3 bucket storing CloudFront access logs
+    Value: !GetAtt CloudFrontDistributionStack.Outputs.CloudFrontLogBucketName
+
+  ViewerURL:
+    Description: Custom domain URL for the Web_Viewer (via CloudFront)
+    Value: !Sub
+      - 'https://${ProjectPrefix}.${Domain}/'
+      - Domain: !GetAtt DomainNameParam.Value
+
+  JudgeFunctionName:
+    Description: Name of the AI judge Lambda (publish deploy/judge/handler.py to it)
+    Value: !GetAtt JudgeStack.Outputs.JudgeFunctionName
+
+  JudgeFunctionUrl:
+    Description: AI judge Lambda Function URL (private; reachable only via CloudFront /judge)
+    Value: !GetAtt JudgeStack.Outputs.JudgeFunctionUrl

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Building Agentic AI with Amazon Bedrock AgentCore — Slides</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- reveal.js core + theme (CDN) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/white.min.css" id="theme" />
+
+  <style>
+    :root {
+      /* Palette from the AgentCore course .pptx theme (theme1.xml) */
+      --aws-navy: #232F3E;   /* dk2 */
+      --aws-blue: #007FAA;   /* accent2 */
+      --aws-orange: #1DB893; /* accent4 */
+      --aws-teal: #005276;   /* accent1 */
+    }
+    .reveal { font-family: "Inter", system-ui, sans-serif; }
+    .reveal .slides section { text-align: left; }
+    .reveal .student-notes { display: none; }
+    .reveal .slide-audio { display: none; }
+
+    /* Full-image slides (mode: "image") */
+    .reveal .slide-image {
+      width: 100%;
+      max-height: 84vh;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto;
+      border-radius: 8px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+    }
+    /* Native (HTML) slide styling, AWS-themed (reserved for authored slides) */
+    .reveal .slide-native { height: 100%; display: flex; flex-direction: column; padding: 0.4em 0.2em; }
+    .reveal .slide-native .kicker { color: var(--aws-blue); font-weight: 700; font-size: 0.5em; letter-spacing: 0.06em; text-transform: uppercase; }
+    .reveal .slide-native h2 { margin: 0.15em 0 0.2em; font-size: 1.1em; line-height: 1.15; color: var(--aws-navy); }
+    .reveal .slide-native h2 em { color: var(--aws-blue); font-style: normal; }
+    .reveal .slide-native .lead { font-size: 0.52em; line-height: 1.4; color: #3a4756; margin: 0 0 0.5em; }
+    .reveal .slide-native ul { font-size: 0.5em; line-height: 1.5; margin: 0.2em 0 0.4em 0; }
+    .reveal .slide-native.section-header, .reveal .slide-native.title-slide {
+      align-items: center; justify-content: center; text-align: center;
+      background: linear-gradient(135deg, var(--aws-navy) 0%, var(--aws-blue) 100%);
+      margin: -0.4em -0.2em; padding: 0.4em; border-radius: 10px;
+    }
+    .reveal .slide-native.section-header .kicker, .reveal .slide-native.title-slide .kicker { color: var(--aws-orange); }
+    .reveal .slide-native.section-header h2, .reveal .slide-native.title-slide h2 { color: #fff; font-size: 1.4em; }
+    .reveal .slide-native.title-slide .lead, .reveal .slide-native.section-header .lead { color: rgba(255,255,255,0.9); }
+
+    /* Top bar */
+    .deck-topbar {
+      position: fixed; top: 0; left: 0; right: 0; height: 44px;
+      background: linear-gradient(135deg, var(--aws-navy) 0%, var(--aws-blue) 100%);
+      color: #fff; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; z-index: 40; font-family: "Inter", system-ui, sans-serif; font-size: 14px;
+    }
+    .deck-topbar .title { font-weight: 600; }
+    .deck-topbar .title span { color: var(--aws-orange); }
+    .deck-topbar a { text-decoration: none; background: var(--aws-orange); color: var(--aws-navy); font-weight: 600; padding: 5px 12px; border-radius: 6px; }
+    .deck-topbar a.secondary, .deck-topbar .topbar-btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.5); margin-right: 8px; }
+    .deck-topbar .topbar-btn { font-family: inherit; font-size: 14px; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+    .deck-topbar .topbar-btn:hover { background: rgba(255,255,255,0.15); }
+    .reveal .slides { margin-top: 20px; }
+    .loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-family: "Inter", system-ui, sans-serif; color: var(--aws-navy); }
+
+    /* Table of contents / slide jump menu */
+    .toc-overlay { position: fixed; inset: 0; background: rgba(35, 47, 62, 0.55); z-index: 50; display: none; }
+    .toc-overlay.open { display: block; }
+    .toc-panel { position: fixed; top: 0; left: 0; bottom: 0; width: 380px; max-width: 85vw; background: #fff; box-shadow: 2px 0 24px rgba(0,0,0,0.25); display: flex; flex-direction: column; font-family: "Inter", system-ui, sans-serif; transform: translateX(-100%); transition: transform 0.22s ease; }
+    .toc-overlay.open .toc-panel { transform: translateX(0); }
+    .toc-panel .toc-head { background: linear-gradient(135deg, var(--aws-navy) 0%, var(--aws-blue) 100%); color: #fff; padding: 14px 16px; font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+    .toc-panel .toc-close { background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px; }
+    .toc-panel .toc-search { border: none; border-bottom: 1px solid #e2e8ee; padding: 10px 16px; font-family: inherit; font-size: 14px; outline: none; }
+    .toc-list { overflow-y: auto; padding: 6px 0; flex: 1; }
+    .toc-item { display: flex; gap: 10px; align-items: baseline; padding: 9px 16px; cursor: pointer; border: none; background: transparent; width: 100%; text-align: left; font-family: inherit; font-size: 14px; color: var(--aws-navy); border-left: 3px solid transparent; }
+    .toc-item:hover { background: #f0f6fc; }
+    .toc-item.active { background: #eaf4fb; border-left-color: var(--aws-orange); font-weight: 600; }
+    .toc-item .toc-num { color: var(--aws-blue); font-weight: 700; min-width: 26px; flex-shrink: 0; }
+    .toc-item .toc-label { line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .toc-item .toc-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: #8a97a6; margin-left: auto; flex-shrink: 0; align-self: center; }
+  </style>
+</head>
+<body>
+  <div class="deck-topbar">
+    <div class="title" id="deckTitle">Building Agentic AI with Amazon Bedrock AgentCore</div>
+    <div>
+      <a class="secondary" href="index.html">All modules</a>
+      <button id="tocBtn" class="topbar-btn" type="button" title="Jump to slide (T)">&#9776; Slides</button>
+      <button id="narrationBtn" class="topbar-btn" type="button" title="Toggle narration">&#128263; Narration: Off</button>
+      <button id="fullscreenBtn" class="topbar-btn" type="button" title="Toggle fullscreen (F)">&#9187; Fullscreen</button>
+    </div>
+  </div>
+
+  <div class="toc-overlay" id="tocOverlay">
+    <div class="toc-panel" role="dialog" aria-label="Slide list">
+      <div class="toc-head"><span>Jump to slide</span><button class="toc-close" id="tocClose" type="button" title="Close (Esc)">&times;</button></div>
+      <input class="toc-search" id="tocSearch" type="text" placeholder="Filter slides&hellip;" />
+      <div class="toc-list" id="tocList"></div>
+    </div>
+  </div>
+
+  <div class="reveal"><div class="slides" id="slides"><section><div class="loading">Loading slides&hellip;</div></section></div></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/plugin/notes/notes.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/plugin/markdown/markdown.min.js"></script>
+  <script>
+    const MODULE_TITLES = {
+      "1": "Foundations of Agentic AI Patterns",
+      "2": "AgentCore Runtime and Framework Integration",
+      "3": "Security and Identity Management",
+      "4": "Tool Integration and AgentCore Gateway",
+      "5": "Agentic Memory Implementation",
+      "6": "Production Monitoring and Observability",
+    };
+
+    function renderNotes(text) {
+      if (!text) return "";
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return text.split(/\n{2,}/).map((para) => {
+        let p = esc(para.trim());
+        p = p.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+        p = p.replace(/\n/g, "<br>");
+        return `<p>${p}</p>`;
+      }).join("");
+    }
+
+    function getModuleNum() {
+      const url = new URL(window.location.href);
+      const m = url.searchParams.get("m");
+      return m && /^\d+$/.test(m) ? m : "1";
+    }
+
+    const AUDIO_VERSION = Date.now();
+
+    // Load a deck's slide data. Prefers the pre-bundled decks/mN.js (assigned to
+    // window.DECK_DATA[N]) which works when the file is opened directly
+    // (file://); falls back to fetching decks/mN.json when served over HTTP.
+    function loadDeckScript(moduleNum) {
+      return new Promise((resolve) => {
+        if (window.DECK_DATA && window.DECK_DATA[moduleNum]) { resolve(window.DECK_DATA[moduleNum]); return; }
+        const el = document.createElement("script");
+        el.src = `decks/m${moduleNum}.js`;
+        el.onload = () => resolve((window.DECK_DATA && window.DECK_DATA[moduleNum]) || null);
+        el.onerror = () => resolve(null);
+        document.head.appendChild(el);
+      });
+    }
+
+    async function loadDeck() {
+      const moduleNum = getModuleNum();
+      const title = MODULE_TITLES[moduleNum] || "Slides";
+      document.getElementById("deckTitle").innerHTML = `Module ${moduleNum} <span>&middot; ${title}</span>`;
+
+      let slides = await loadDeckScript(moduleNum);
+      if (!slides) {
+        // HTTP fallback: fetch the JSON directly.
+        try {
+          const res = await fetch(`decks/m${moduleNum}.json`, { cache: "no-cache" });
+          if (res.ok) slides = await res.json();
+        } catch (e) { /* file:// with no bundle — handled below */ }
+      }
+      if (!slides) {
+        document.getElementById("slides").innerHTML = `<section><h2>Deck not found</h2><p>Expected <code>decks/m${moduleNum}.js</code> (or <code>.json</code> when served over HTTP).</p></section>`;
+        initReveal(); return;
+      }
+      const container = document.getElementById("slides");
+      container.innerHTML = slides.map((s) => {
+        let body;
+        if (s.mode === "native" && s.native) {
+          const extra = s.nativeClass ? ` ${s.nativeClass}` : "";
+          body = `<div class="slide-native${extra}">${s.native}</div>`;
+        } else {
+          body = s.image ? `<img class="slide-image" src="${s.image}" alt="Module ${moduleNum} slide ${s.n}" />` : "";
+        }
+        const student = s.student ? `<div class="student-notes">${renderNotes(s.student)}</div>` : "";
+        const speaker = `<aside class="notes">${s.student ? `<p><strong>Slide notes</strong></p>${renderNotes(s.student)}` : ""}</aside>`;
+        const audioSrc = s.audio ? `${s.audio}?v=${AUDIO_VERSION}` : "";
+        const audio = audioSrc ? `<audio class="slide-audio" preload="none" src="${audioSrc}"></audio>` : "";
+        const sectAttr = audioSrc ? ` data-audio="${audioSrc}"` : "";
+        return `<section${sectAttr}>${body}${student}${speaker}${audio}</section>`;
+      }).join("");
+      initReveal(); initNarration(); buildTOC();
+    }
+
+    function slideLabel(section) {
+      const h2 = section.querySelector(".slide-native h2");
+      if (h2 && h2.textContent.trim()) return h2.textContent.trim();
+      const notes = section.querySelector(".student-notes");
+      if (notes && notes.textContent.trim()) return notes.textContent.trim().split(/\s+/).slice(0, 9).join(" ") + "…";
+      return "";
+    }
+    function slideKind(section) {
+      if (section.querySelector(".slide-image")) return "image";
+      if (section.querySelector(".slide-native.section-header")) return "section";
+      if (section.querySelector(".slide-native.title-slide")) return "title";
+      if (section.querySelector(".slide-native")) return "slide";
+      return "";
+    }
+    function buildTOC() {
+      const list = document.getElementById("tocList"); if (!list) return;
+      const sections = Array.from(document.querySelectorAll(".reveal .slides > section"));
+      list.innerHTML = sections.map((sec, i) => {
+        const label = slideLabel(sec) || `Slide ${i + 1}`;
+        const kind = slideKind(sec);
+        const kindTag = kind ? `<span class="toc-kind">${kind}</span>` : "";
+        return `<button class="toc-item" data-index="${i}" type="button"><span class="toc-num">${i + 1}</span><span class="toc-label">${label.replace(/</g, "&lt;")}</span>${kindTag}</button>`;
+      }).join("");
+      list.querySelectorAll(".toc-item").forEach((btn) => btn.addEventListener("click", () => { Reveal.slide(parseInt(btn.dataset.index, 10)); closeTOC(); }));
+      highlightTOC();
+    }
+    function highlightTOC() {
+      const idx = Reveal.getIndices().h;
+      document.querySelectorAll(".toc-item").forEach((btn) => {
+        const active = parseInt(btn.dataset.index, 10) === idx;
+        btn.classList.toggle("active", active);
+        if (active) btn.scrollIntoView({ block: "nearest" });
+      });
+    }
+    function openTOC() { document.getElementById("tocOverlay").classList.add("open"); highlightTOC(); const s = document.getElementById("tocSearch"); if (s) { s.value = ""; filterTOC(""); setTimeout(() => s.focus(), 50); } }
+    function closeTOC() { document.getElementById("tocOverlay").classList.remove("open"); }
+    function toggleTOC() { document.getElementById("tocOverlay").classList.contains("open") ? closeTOC() : openTOC(); }
+    function filterTOC(q) { const needle = q.trim().toLowerCase(); document.querySelectorAll(".toc-item").forEach((btn) => { btn.style.display = !needle || btn.textContent.toLowerCase().includes(needle) ? "" : "none"; }); }
+    function initTOC() {
+      document.getElementById("tocBtn").addEventListener("click", (e) => { e.currentTarget.blur(); toggleTOC(); });
+      document.getElementById("tocClose").addEventListener("click", closeTOC);
+      document.getElementById("tocOverlay").addEventListener("click", (e) => { if (e.target.id === "tocOverlay") closeTOC(); });
+      const search = document.getElementById("tocSearch");
+      search.addEventListener("input", (e) => filterTOC(e.target.value));
+      search.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { closeTOC(); return; }
+        if (e.key === "Enter") { const first = Array.from(document.querySelectorAll(".toc-item")).find((b) => b.style.display !== "none"); if (first) { Reveal.slide(parseInt(first.dataset.index, 10)); closeTOC(); } }
+      });
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.getElementById("tocOverlay").classList.contains("open")) closeTOC(); });
+    }
+    function initReveal() {
+      Reveal.initialize({
+        hash: true, slideNumber: "c/t", transition: "slide", width: 1280, height: 720, margin: 0.04,
+        navigationMode: "linear", plugins: [RevealNotes, RevealMarkdown],
+        keyboard: { 33: "prev", 34: "next", 32: "next", 37: "prev", 38: "prev", 39: "next", 40: "next",
+          36: () => Reveal.slide(0), 35: () => Reveal.slide(Reveal.getTotalSlides() - 1),
+          66: "togglePause", 190: "togglePause", 84: () => toggleTOC() },
+      });
+      Reveal.on("slidechanged", highlightTOC);
+    }
+    let narrationOn = false, audioUnlocked = false;
+    function allAudioEls() { return Array.from(document.querySelectorAll("audio.slide-audio")); }
+    function stopAllAudio(except) { allAudioEls().forEach((a) => { if (a !== except) { a.pause(); try { a.currentTime = 0; } catch (e) {} } }); }
+    function currentAudioEl() { const s = Reveal.getCurrentSlide(); return s ? s.querySelector("audio.slide-audio") : null; }
+    function playCurrent() {
+      stopAllAudio(currentAudioEl()); if (!narrationOn) return;
+      const a = currentAudioEl(); if (!a) return;
+      try { a.currentTime = 0; } catch (e) {}
+      const p = a.play();
+      if (p && typeof p.catch === "function") p.then(() => { audioUnlocked = true; hideUnlockHint(); }).catch(() => { if (!audioUnlocked) showUnlockHint(); });
+    }
+    function setNarration(on) { narrationOn = on; const b = document.getElementById("narrationBtn"); if (b) b.innerHTML = on ? "&#128266; Narration: On" : "&#128263; Narration: Off"; if (on) playCurrent(); else stopAllAudio(null); }
+    function showUnlockHint() {
+      let h = document.getElementById("narrationHint"); if (h) return;
+      h = document.createElement("button"); h.id = "narrationHint"; h.type = "button"; h.textContent = "🔊 Click to enable narration";
+      h.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:60;background:var(--aws-orange);color:var(--aws-navy);border:none;border-radius:24px;padding:12px 22px;font-weight:700;font-family:Inter,system-ui,sans-serif;font-size:15px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.25);";
+      h.addEventListener("click", () => { audioUnlocked = true; hideUnlockHint(); playCurrent(); });
+      document.body.appendChild(h);
+    }
+    function hideUnlockHint() { const h = document.getElementById("narrationHint"); if (h) h.remove(); }
+    function initNarration() { const b = document.getElementById("narrationBtn"); if (b) b.addEventListener("click", (e) => { e.currentTarget.blur(); setNarration(!narrationOn); }); Reveal.on("ready", playCurrent); Reveal.on("slidechanged", playCurrent); }
+    function toggleFullscreen() { const el = document.documentElement; const isFs = document.fullscreenElement || document.webkitFullscreenElement; if (!isFs) { (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); } else { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); } }
+    document.getElementById("fullscreenBtn").addEventListener("click", (e) => { e.currentTarget.blur(); toggleFullscreen(); });
+    function updateFsLabel() { const isFs = document.fullscreenElement || document.webkitFullscreenElement; document.getElementById("fullscreenBtn").innerHTML = isFs ? "&#9187; Exit fullscreen" : "&#9187; Fullscreen"; }
+    document.addEventListener("fullscreenchange", updateFsLabel);
+    document.addEventListener("webkitfullscreenchange", updateFsLabel);
+    initTOC(); loadDeck();
+  </script>
+</body>
+</html>

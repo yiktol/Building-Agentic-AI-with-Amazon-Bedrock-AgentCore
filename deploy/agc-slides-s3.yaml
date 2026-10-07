@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Building Agentic AI with Amazon Bedrock AgentCore - Slides Pipeline - S3
+  content origin. A private S3 bucket that stores the generated Web_Viewer
+  content (the slides/ reveal.js app) and serves as the CloudFront origin. The
+  bucket blocks all public access; only the CloudFront distribution can read it,
+  via an Origin Access Control (OAC) grant. The bucket policy that authorizes
+  CloudFront lives in the CloudFront stack, where the distribution ARN is
+  available directly, which avoids a create-order cycle between the bucket
+  policy and the distribution.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Description: Prefix for all resource names
+    Default: agc
+
+Resources:
+  # Private Content_Bucket: all public access blocked, server-side encryption
+  # (AES256) enabled, and versioning enabled.
+  ContentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectPrefix}-content-${AWS::Region}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectPrefix}-content'
+
+Outputs:
+  ContentBucketName:
+    Description: Name of the S3 content bucket
+    Value: !Ref ContentBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-ContentBucketName'
+
+  ContentBucketDomainName:
+    Description: Regional domain name of the S3 content bucket (CloudFront origin)
+    Value: !GetAtt ContentBucket.RegionalDomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-ContentBucketDomainName'
+
+  ContentBucketArn:
+    Description: ARN of the S3 content bucket
+    Value: !GetAtt ContentBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ContentBucketArn'

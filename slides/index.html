@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Building Agentic AI with Amazon Bedrock AgentCore</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    :root {
+      /* Palette from the AgentCore course .pptx theme (theme1.xml) */
+      --navy: #232F3E; --blue: #007FAA; --orange: #1DB893; --teal: #005276;
+      --ink: #1a2230; --muted: #64748b; --line: #e6e9ee; --bg: #f5f7fa; --card: #ffffff;
+      --radius: 16px; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.06);
+      --shadow-hover: 0 6px 16px rgba(16,24,40,.10), 0 18px 40px rgba(16,24,40,.12);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Inter", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+    header { background: radial-gradient(1200px 400px at 80% -20%, rgba(29,184,147,.30), transparent 60%), linear-gradient(135deg, var(--navy) 0%, #005276 55%, var(--blue) 100%); color: #fff; padding: clamp(2rem, 5vw, 3.25rem) 1.5rem; text-align: center; }
+    header h1 { margin: 0 auto; max-width: 900px; font-size: clamp(1.4rem, 3.2vw, 2.1rem); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+    header h1 span { color: var(--orange); }
+    header p { margin: 0.75rem auto 0; max-width: 680px; opacity: 0.85; font-size: clamp(0.9rem, 1.6vw, 1.02rem); font-weight: 300; }
+    main { max-width: 1120px; margin: 0 auto; padding: 1.75rem 1.5rem; }
+    .scenario { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--orange); border-radius: 12px; padding: 1rem 1.25rem; font-size: 0.92rem; line-height: 1.55; color: #40506a; margin-bottom: 1.75rem; box-shadow: var(--shadow); }
+    .scenario strong { color: var(--ink); }
+    .section-label { display: flex; align-items: center; gap: .6rem; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 1.75rem 0 .9rem; }
+    .section-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 1.1rem; }
+    .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.35rem 1.35rem 1.25rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.65rem; overflow: hidden; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+    .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--accent, var(--blue)); }
+    .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-hover); border-color: #d7dde6; }
+    .card-top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+    .kicker { display: inline-flex; align-items: center; gap: .45rem; font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent, var(--blue)); }
+    .badge { font-size: .68rem; font-weight: 700; color: var(--muted); background: #f1f4f8; border: 1px solid var(--line); padding: .2rem .55rem; border-radius: 999px; white-space: nowrap; }
+    .icon { width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center; font-size: .95rem; color: #fff; background: var(--accent, var(--blue)); }
+    .card h3 { margin: .1rem 0 0; font-size: 1.08rem; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; }
+    .card p.desc { margin: 0; font-size: 0.88rem; line-height: 1.55; color: #52627a; flex: 1; }
+    .card .actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: .35rem; }
+    .btn { text-decoration: none; font-weight: 600; font-size: 0.85rem; padding: 0.55rem 0.95rem; border-radius: 10px; display: inline-flex; align-items: center; gap: .4rem; transition: background .15s ease, transform .15s ease, box-shadow .15s ease; }
+    .btn-primary { background: var(--accent, var(--blue)); color: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.15); }
+    .btn-primary:hover { filter: brightness(1.06); transform: translateX(2px); }
+    .btn-quiz { background: #eafaf4; color: #12403e; border: 1px solid #1DB893; }
+    .btn-quiz:hover { background: #ddf4ea; transform: translateX(2px); }
+    .btn-classroom { background: #eaf2f7; color: #003a52; border: 1px solid #005276; }
+    .btn-classroom:hover { background: #dde9f0; transform: translateX(2px); }
+    .card.module { --accent: var(--blue); }
+    .card.resource { --accent: var(--teal); }
+    footer { max-width: 1120px; margin: 0 auto; padding: 1rem 1.5rem 2.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
+    footer kbd { font-family: inherit; font-size: .74rem; font-weight: 600; background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: .1rem .4rem; color: var(--ink); }
+    @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } main { padding: 1.25rem 1rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Building Agentic AI with <span>Amazon Bedrock AgentCore</span></h1>
+    <p>Take agents from prototype to production — runtime, security, tools, memory, and observability with the AWS AgentCore service family.</p>
+  </header>
+  <main>
+    <div class="scenario">
+      <strong>About this course:</strong> a hands-on path to building production-ready agentic AI on AWS.
+      You will start with the <strong>foundations</strong> of agentic systems and the Amazon Bedrock AgentCore
+      services, then deploy agents on <strong>AgentCore Runtime</strong> with popular open-source frameworks.
+      From there you secure agents with <strong>AgentCore Identity</strong>, extend them with tools through
+      <strong>AgentCore Gateway</strong> and the Model Context Protocol, give them short- and long-term
+      <strong>AgentCore Memory</strong>, and finally monitor and evaluate them in production with
+      <strong>AgentCore Observability</strong> and <strong>Evaluations</strong>.
+    </div>
+    <div class="section-label"><i class="fa-solid fa-layer-group"></i> Course modules</div>
+    <div class="grid" id="grid-modules"></div>
+
+    <div class="section-label"><i class="fa-solid fa-flask"></i> Hands-on lab</div>
+    <div class="grid" id="grid-resources"></div>
+  </main>
+  <footer>
+    Present a module: click <strong>Present slides</strong>. In the viewer, press
+    <kbd>S</kbd> for speaker notes, <kbd>T</kbd> for the slide list, <kbd>F</kbd> for fullscreen, and the <kbd>&larr;</kbd> <kbd>&rarr;</kbd> arrow keys to navigate.
+    Toggle <strong>Narration</strong> in the top bar to play the Amazon Polly audio for each slide.
+    Each module also has a <strong>Knowledge check</strong> — a short quiz where an AI assistant explains why your answer is right or wrong.
+  </footer>
+  <script>
+    const modules = [
+      { n: 1, href: "deck.html?m=1", title: "Foundations of Agentic AI Patterns", desc: "What makes a system agentic, the five core components of an agent, and an introduction to the Amazon Bedrock AgentCore service family.", meta: "Foundations" },
+      { n: 2, href: "deck.html?m=2", title: "AgentCore Runtime and Framework Integration", desc: "Build agents with Strands, LangGraph, CrewAI, and LlamaIndex, then deploy them on AgentCore Runtime with session isolation and serverless execution.", meta: "Runtime" },
+      { n: 3, href: "deck.html?m=3", title: "Security and Identity Management", desc: "Inbound and outbound authentication, OAuth patterns, workload identities, and securing agents with AgentCore Identity.", meta: "Security" },
+      { n: 4, href: "deck.html?m=4", title: "Tool Integration and AgentCore Gateway", desc: "Built-in tools, the Model Context Protocol, turning APIs and Lambda into agent tools with AgentCore Gateway, and governing calls with AgentCore Policy.", meta: "Tools" },
+      { n: 5, href: "deck.html?m=5", title: "Agentic Memory Implementation", desc: "Short-term and long-term memory, extraction strategies and namespaces, and securing memory with fine-grained access control.", meta: "Memory" },
+      { n: 6, href: "deck.html?m=6", title: "Production Monitoring and Observability", desc: "End-to-end tracing with AgentCore Observability and CloudWatch, plus verifying agent quality with AgentCore Evaluations.", meta: "Observability" },
+    ];
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    document.getElementById("grid-modules").innerHTML = modules.map((m) => `
+      <article class="card module">
+        <div class="card-top">
+          <span class="kicker"><span class="icon"><i class="fa-solid fa-layer-group"></i></span> Module ${m.n}</span>
+          ${m.meta ? `<span class="badge">${esc(m.meta)}</span>` : ""}
+        </div>
+        <h3>${esc(m.title)}</h3>
+        <p class="desc">${esc(m.desc)}</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="${m.href}"><i class="fa-solid fa-play"></i> Present slides</a>
+          <a class="btn btn-quiz" href="quiz.html?m=${m.n}"><i class="fa-solid fa-circle-question"></i> Knowledge check</a>
+        </div>
+      </article>`).join("");
+
+    // Course resources: reference handouts rendered in the shared doc.html viewer.
+    const resources = [
+      { doc: "lab", icon: "fa-flask", title: "Enhance and Scale Agents with Amazon Bedrock AgentCore", desc: "A hands-on lab: transform a basic customer support agent into a production-ready system using AgentCore Memory for persistent context and AgentCore Gateway for secure, Lambda-based tools with JWT auth.", meta: "Lab guide", classroom: "https://classrooms.aws.training" },
+    ];
+    document.getElementById("grid-resources").innerHTML = resources.map((r) => `
+      <article class="card resource">
+        <div class="card-top">
+          <span class="kicker"><span class="icon"><i class="fa-solid ${esc(r.icon)}"></i></span> Lab</span>
+          ${r.meta ? `<span class="badge">${esc(r.meta)}</span>` : ""}
+        </div>
+        <h3>${esc(r.title)}</h3>
+        <p class="desc">${esc(r.desc)}</p>
+        <div class="actions">
+          <a class="btn btn-primary" href="doc.html?doc=${r.doc}"><i class="fa-solid fa-book-open"></i> Open lab guide</a>
+          ${r.classroom ? `<a class="btn btn-classroom" href="${r.classroom}" target="_blank" rel="noopener"><i class="fa-solid fa-chalkboard-user"></i> Classroom Lab<i class="fa-solid fa-arrow-up-right-from-square" style="font-size:.72em;margin-left:.3em;opacity:.7"></i></a>` : ""}
+        </div>
+      </article>`).join("");
+  </script>
+</body>
+</html>

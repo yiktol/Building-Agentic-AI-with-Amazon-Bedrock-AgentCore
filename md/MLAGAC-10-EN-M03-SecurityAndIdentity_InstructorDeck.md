@@ -1,0 +1,247 @@
+# Module 3 — Security and Identity Management
+
+> Source deck: `ppt/MLAGAC-10-EN-M03-SecurityAndIdentity_InstructorDeck_Narrated.pptx`  
+> 29 slides total. Each slide below shows the rendered slide image followed by its narration script.  
+> Knowledge check questions are in a separate file: [`MLAGAC-10-EN-M03-SecurityAndIdentity_InstructorDeck_KnowledgeCheck.md`](MLAGAC-10-EN-M03-SecurityAndIdentity_InstructorDeck_KnowledgeCheck.md).
+
+---
+
+## Slide 1 — Security and Identity Management
+
+![M03 slide 1](images/M03/slide-01.png)
+
+**Narration:**
+
+> Welcome to Security and Identity Management. Agents are powerful precisely because they can act autonomously, but that same autonomy creates new security challenges. In this module we'll examine how security and identity work in agentic systems, and then dig into how AgentCore Identity secures your agents, both when users access them and when they access resources on a user's behalf.
+
+---
+
+## Slide 2 — Agenda
+
+![M03 slide 2](images/M03/slide-02.png)
+
+**Narration:**
+
+> Here is our agenda. First, managing security and identity in agentic systems, where we'll establish the core concepts. Then, securing your agents with AgentCore Identity, where we'll see the service in action. By the end of this module you will be able to configure AgentCore Identity for enterprise security requirements, implement secure token management and permission delegation, and ensure compliance with data governance and audit requirements.
+
+---
+
+## Slide 3 — Managing security and identity in agentic systems
+
+![M03 slide 3](images/M03/slide-03.png)
+
+**Narration:**
+
+> Let's start by understanding why security and identity are especially challenging in agentic systems.
+
+---
+
+## Slide 4 — Agents present identity challenges
+
+![M03 slide 4](images/M03/slide-04.png)
+
+**Narration:**
+
+> Agents introduce identity challenges that traditional applications simply don't face. The core issue is a paradigm shift, from static user permissions to dynamic, context-aware authorization that adapts to agent behavior and delegation. In a traditional application, a single user identity flows through the system. But agents operate autonomously, make decisions without human intervention, and often need to access many systems on behalf of users or even other agents. That creates multiple identity contexts and a complex web of authentication and authorization requirements. Consider a customer support agent that needs to access a system like Salesforce on behalf of user A, but must never accidentally retrieve data belonging to user B. Handling that correctly requires sophisticated identity propagation and isolation. As agents connect to internal APIs, external services, SaaS tools, and other agents, the challenges multiply: access control and enforcement, authorization and delegation, managing the identity lifecycle at scale, integrating with third parties, and maintaining governance and compliance.
+
+---
+
+## Slide 5 — Inbound and outbound authentication for agent access
+
+![M03 slide 5](images/M03/slide-05.png)
+
+**Narration:**
+
+> A useful way to organize all of this is to split authentication into two directions: inbound and outbound. Inbound authentication is about users needing to access the agent through an application; it determines who can access your agent and how they prove their identity. Outbound authentication is about the agent needing to access resources on the user's behalf. We'll look at each direction in detail, but the key idea to hold onto is that an agent sits in the middle, authenticating requests coming in and authenticating itself when reaching out.
+
+---
+
+## Slide 6 — Inbound authentication for agent access
+
+![M03 slide 6](images/M03/slide-06.png)
+
+**Narration:**
+
+> Let's focus on inbound authentication for agent access. Inbound authentication determines who can access your agents and how they prove their identity, and there are three primary patterns. The first is direct user authentication through an identity provider such as Amazon Cognito, which suits interactive agents. The second is API key access, used for system-to-system communication and automated workflows. The third is federated authentication, which supports enterprise single sign-on. The important consideration across all three is maintaining the authentication context throughout the agent's execution, because that context enables proper audit trails and authorization decisions. AgentCore Runtime supports these patterns through its embedded identity system, which integrates authentication directly into the agent's execution environment.
+
+---
+
+## Slide 7 — Inbound authentication for agent access
+
+![M03 slide 7](images/M03/slide-07.png)
+
+**Narration:**
+
+> Diving deeper, AgentCore Runtime supports two primary methods for authenticating external clients that call into your agent. The first is IAM SigV4 authentication, which uses AWS Identity and Access Management with Signature Version 4 signing. This method leverages your existing AWS credentials and IAM policies to control access, so you configure IAM authorization and invoke the agent with the appropriate user credentials. The second is JWT bearer token authentication, which accepts JSON Web Tokens from identity providers as bearer tokens in the Authorization header. You configure the authorizer when you create the agent, specifying your identity provider's discovery URL and the allowed clients. AgentCore supports tokens from various providers, including Amazon Cognito for user authentication and enterprise single sign-on solutions for federated access.
+
+---
+
+## Slide 8 — Outbound authentication: agents prove their identity
+
+![M03 slide 8](images/M03/slide-08.png)
+
+**Narration:**
+
+> Now let's turn to outbound authentication, where the agent proves its identity to external systems it needs to access. This is more complex than inbound authentication, because an agent often needs to act with different levels of authority depending on the context. There are three primary patterns. The first is AWS credentials using IAM roles for AWS services, which works well inside the AWS ecosystem but does not extend to external services. The second is machine-to-machine authentication using OAuth client credentials, which lets the agent access external APIs with its own credentials for system-level operations. The third is user-delegated access using the OAuth authorization code flow, used when the task requires explicit user consent and delegation. Each pattern addresses a different trust relationship, so you choose based on whether the agent is acting as itself or on behalf of a specific user.
+
+---
+
+## Slide 9 — Authorization patterns
+
+![M03 slide 9](images/M03/slide-09.png)
+
+**Narration:**
+
+> Let's connect these to the authorization patterns that AgentCore Identity implements. There are three. The first is SigV4, AWS Signature Version 4, which is the default authentication mechanism for AgentCore services and integrates seamlessly with IAM. It validates inbound requests using AWS credentials, and for outbound authorization, Gateway uses its service role to access AWS resources with SigV4. The second is OAuth two-legged authentication, also called the client credentials grant or machine-to-machine authentication. Here an application accesses resources on its own behalf rather than on behalf of a user, which is ideal for automated, system-to-system communication, with credentials securely managed through the Identity credential provider. The third is OAuth three-legged authentication, the authorization code grant, which implements user-delegated access. The user provides explicit consent for the agent to act on their behalf, keeping the user in control of their data. AgentCore Identity generates authorization URLs for the user, fetches and stores the resulting access tokens in its token vault, and uses session binding to verify that the user who starts an authorization request is the same user who grants consent. Note that the lab in this course includes a two-legged authentication example.
+
+---
+
+## Slide 10 — Enterprise security architecture considerations
+
+![M03 slide 10](images/M03/slide-10.png)
+
+**Narration:**
+
+> Enterprise deployments add security requirements that go beyond basic authentication and authorization. Compliance frameworks often require detailed audit trails that show exactly what actions an agent performed and on whose behalf, which means every agent action must be logged with both the agent identity and any associated user context, for complete traceability. Network security becomes critical when agents reach external services, so you need to control which endpoints agents can access and monitor all external communication. Data governance requires that agents only access data they are authorized to use and that sensitive information never leaks across tenant boundaries. And you need incident response procedures tailored to agent behavior, including the ability to quickly revoke an agent's permissions and audit any potentially compromised workflows. In short: log everything with context, control network access, maintain tenant boundaries, and be ready to revoke access fast.
+
+---
+
+## Slide 11 — Your Agent
+
+![M03 slide 11](images/M03/slide-11.png)
+
+**Narration:**
+
+> Before we look at the service itself, let's pause and reflect on your own agent. How will you keep it secure, and what do you think will be different about securing an agentic system compared to a traditional application? Consider how the autonomy and delegation we've discussed change the security picture. Keep your answers in mind as we now explore how AgentCore Identity addresses these exact challenges.
+
+---
+
+## Slide 12 — Securing your agents with AgentCore Identity
+
+![M03 slide 12](images/M03/slide-12.png)
+
+**Narration:**
+
+> Let's move into securing your agents with AgentCore Identity.
+
+---
+
+## Slide 13 — AgentCore Identity
+
+![M03 slide 13](images/M03/slide-13.png)
+
+**Narration:**
+
+> Traditional identity management systems were designed for human users, not for autonomous AI agents that operate across many systems at once. AgentCore Identity addresses the unique challenges of agent authentication by providing secure storage, retrieval, and management of credentials across different trust domains. It acts as a centralized identity hub that lets agents authenticate with AWS services, third-party APIs, and external systems, while maintaining comprehensive security controls and audit trails. This specialized approach lets agents operate autonomously while preserving the security boundaries and access controls that enterprise deployments require.
+
+---
+
+## Slide 14 — Key features and enterprise benefits
+
+![M03 slide 14](images/M03/slide-14.png)
+
+**Narration:**
+
+> Let's summarize the key features and enterprise benefits. At its core, AgentCore Identity provides secure identity and credential management for enterprise agents through a unified directory service. Its core capabilities are these: it creates unique agent identities, each with metadata such as a name, an ARN, OAuth URLs, and timestamps; it manages credentials with multi-layer security and complete audit logging; and it stores user tokens in a secure vault that simplifies authentication flows. The benefits that flow from these capabilities are secure delegated access, so agents can act on behalf of users safely; accelerated development, because you don't have to build identity infrastructure yourself; and a streamlined user experience, because the token vault reduces repeated authorization prompts.
+
+---
+
+## Slide 15 — Auth with AgentCore Identity
+
+![M03 slide 15](images/M03/slide-15.png)
+
+**Narration:**
+
+> Here's how AgentCore Identity secures an entire agent workflow across four key integration points. The first is inbound authentication between users and Runtime, which you configure with OAuth 2.0 or JWT token validation through the authorizer configuration, specifying authentication providers with the authorizer config parameter so that only authenticated users gain access. The second is Runtime's outbound authentication to AWS services through IAM roles and policies; you assign an execution role that grants the permissions your agent needs for services like Amazon S3, DynamoDB, or Lambda, and Runtime assumes that role automatically. The third is the connection between Runtime and Gateway, which benefits from automatic certificate-based authentication and secure connections, with service-to-service tokens managed for you. The fourth is Gateway's outbound authentication to external tools and APIs, where you configure API keys, OAuth tokens, or custom headers in your tool definitions, and Gateway securely stores those credentials and includes them in tool invocations. The result is centralized credential management while your agents access everything they need seamlessly.
+
+---
+
+## Slide 16 — Workload identity
+
+![M03 slide 16](images/M03/slide-16.png)
+
+**Narration:**
+
+> Let's talk about workload identity, which is the digital identity of your agent within AWS. When you deploy an agent using AgentCore Runtime, the service automatically creates a workload identity associated with that agent, managed by the service and including the settings needed for your deployment environment. The workload identity ARN is returned in the deployment response, and you use it in IAM policies and for access control. For agents that are not hosted by Runtime or Gateway, such as self-hosted or hybrid deployments, you can create workload identities manually. The value of a workload identity is that it provides a stable anchor that stays consistent across environments and authentication schemes. The same agent identity works whether the agent uses IAM roles for AWS resources, OAuth 2.0 tokens for external services, or API keys for third-party tools. Unlike traditional service accounts tied to specific infrastructure, workload identities are environment-agnostic and can carry multiple credential types at once, which enables flexible deployment patterns and smooth transitions between environments.
+
+---
+
+## Slide 17 — Agent identity directory and management
+
+![M03 slide 17](images/M03/slide-17.png)
+
+**Narration:**
+
+> The agent identity directory is the centralized registry of all workload identities in your AWS account. It gives you a single, authoritative view of every identity, whether it was created automatically by Runtime or Gateway, or manually through the CLI or SDK. The command shown here lists your workload identities, and the example output shows two: one created by AgentCore Runtime and one created manually. The directory functions much like an Amazon Cognito user pool, acting as a governance unit where administrators can configure policies across a common set of identities. You can create identities in several ways, including command-line tools for automation, programmatic APIs for integration, and automatic creation through AgentCore services, with each method supporting the full range of identity properties.
+
+---
+
+## Slide 18 — Credential provider types and configuration
+
+![M03 slide 18](images/M03/slide-18.png)
+
+**Narration:**
+
+> AgentCore Identity supports multiple credential provider types to accommodate the different authentication patterns used by various services. Resource credential providers act as intelligent intermediaries that manage the relationships between agents, identity providers, and resource servers. The service includes built-in providers for popular services such as Google, GitHub, Slack, and Salesforce, with authorization server endpoints and provider-specific parameters pre-configured to save you development effort. For services not covered by a built-in provider, you can configure an OAuth 2.0 credential provider that works with any OAuth 2.0-compatible resource server. The two main authentication patterns supported are machine-to-machine authentication, using the OAuth 2.0 client credentials grant, and user-delegated access, using the OAuth 2.0 authorization code grant. The credential system supports several credential types, including OAuth 2.0 access tokens, API keys, client certificates, SAML assertions, and custom tokens, each handled securely according to its requirements.
+
+---
+
+## Slide 19 — Creating an OAuth2 credential provider
+
+![M03 slide 19](images/M03/slide-19.png)
+
+**Narration:**
+
+> Let's look at the code to create an OAuth 2.0 credential provider. You begin by creating an identity client from the bedrock_agentcore identity module, specifying your region. You then call create_oauth2_credential_provider, giving it a name, the credential provider vendor, and the provider-specific configuration. In this example we configure a GitHub OAuth 2.0 provider by supplying a client ID and client secret. This approach lets agents authenticate as themselves rather than impersonating users, which supports delegation-based access where the agent acts on behalf of a user only when appropriate. Because it integrates with your existing identity providers, you avoid migrating users or rebuilding your authentication flows, and you get secure, scalable agent identity management that works alongside your current infrastructure.
+
+---
+
+## Slide 20 — Creating an API key credential provider
+
+![M03 slide 20](images/M03/slide-20.png)
+
+**Narration:**
+
+> Creating an API key credential provider is even simpler. You create the identity client for your region, then call create_api_key_credential_provider with a name and the API key value. You can do this through the AgentCore Identity console or programmatically using the control plane APIs. Once created, you assign the credential provider to specific tools in your agent configuration, which lets your agent access external APIs without ever hardcoding sensitive keys in your code. When the agent invokes an external tool, AgentCore Identity automatically injects the API key into the outbound request. The benefit is centralized credential management with support for rotation, so you keep secrets out of your code and under control.
+
+---
+
+## Slide 21 — AgentCore Runtime with AgentCore Identity
+
+![M03 slide 21](images/M03/slide-21.png)
+
+**Narration:**
+
+> Now let's see how Runtime and Identity work together in a secure deployment. The code configures a Runtime deployment with Amazon Cognito authentication. You call configure on the Runtime object, specifying the entry point, the execution role, automatic container registry creation, a requirements file, the region, and the agent name. Critically, you also pass an authorizer configuration with a custom JWT authorizer, listing the allowed Cognito client and the Cognito discovery URL, and then you launch to deploy to production. Behind this simple configuration, AgentCore Identity implements a sophisticated access control model that separates credential storage from credential access, so agents never have direct access to long-term secrets or refresh tokens. It uses workload access tokens that carry both the identity of the agent and the identity of the end user the agent is acting for, which enables proper authorization decisions. Runtime provides these tokens automatically when it hosts the agent, and agents hosted elsewhere can retrieve them using the SDK. Both user-delegated and machine-to-machine patterns benefit from secure credential storage, consistent authentication interfaces, comprehensive audit logging, and fine-grained access controls.
+
+---
+
+## Slide 22 — AgentCore Runtime execution role
+
+![M03 slide 22](images/M03/slide-22.png)
+
+**Narration:**
+
+> Let's look more closely at the Runtime execution role and how it integrates with Identity through a service-linked role. AgentCore uses a service-linked role, named for Bedrock AgentCore Runtime Identity, with a dedicated service principal, to manage workload identity permissions automatically. When you invoke a Runtime with OAuth authentication or JWT bearer tokens, you configure the JWT authorizer settings, including the discovery URL, allowed clients, and allowed audiences, during runtime creation. AgentCore creates the service-linked role automatically, and the runtime uses it to exchange JWT tokens for workload access tokens securely. The diagram shows the kinds of permissions the execution role carries: getting a workload access token for the JWT and user ID from Identity, writing traces and sampling rules to AWS X-Ray, creating and writing log groups and events in Amazon CloudWatch, pulling images and authorization tokens from the container registry, and invoking models with or without streaming. You can add other AWS service actions and other AgentCore services as needed. Your agent code uses these tokens to access external OAuth providers and services, with all token management handled transparently.
+
+---
+
+## Slide 28 — Module summary
+
+![M03 slide 28](images/M03/slide-28.png)
+
+**Narration:**
+
+> Let's recap this module. You should now be able to configure AgentCore Identity for enterprise security requirements, implement secure token management and permission delegation, and ensure compliance with data governance and audit requirements. With identity and security in place, your agents can safely access the resources they need.
+
+---
+
+## Slide 29 — Questions?
+
+![M03 slide 29](images/M03/slide-29.png)
+
+**Narration:**
+
+> That brings us to the end of this module. Take a moment to reflect on how security and identity apply to the agent you are building, especially the differences that autonomy and delegation introduce. Remember that AWS offers many resources for continued learning, including the AWS documentation, AWS Training and Certification, and AWS Support. If you have questions about the material or how to apply it, this is a great time to ask.
+
+---

@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Building Agentic AI with Amazon Bedrock AgentCore - Slides Pipeline - AI judge
+  backend. A Python Lambda explains a learner's multiple-choice knowledge-check
+  answer (why it is right or wrong) using Amazon Bedrock (Claude Haiku 4.5) in
+  this region. The function is exposed through a Lambda Function URL with IAM
+  auth; only the course CloudFront distribution can reach it (via Origin Access
+  Control, SigV4-signed), and the function additionally verifies a secret origin
+  header that CloudFront injects and the browser never sees. Reserved
+  concurrency caps blast radius / cost. No public, unauthenticated surface.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Description: Prefix for all resource names
+    Default: agc
+
+  JudgeModelId:
+    Type: String
+    Description: Bedrock model (inference profile) id used to explain answers
+    Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+  OriginSecret:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Shared secret CloudFront sends as the x-origin-secret header; the Lambda
+      rejects requests that do not match. Blocks direct hits on the CloudFront
+      /judge path from being graded.
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 3
+    Description: Hard ceiling on concurrent judge executions (cost / abuse cap)
+
+  CloudFrontDistributionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the CloudFront distribution allowed to invoke the Function URL via
+      OAC. When set, the Lambda resource policy is scoped to this exact ARN
+      (aws:SourceArn), per AWS guidance. Leave empty on the very first create
+      (before the distribution exists); set it on the next deploy.
+
+Conditions:
+  HasDistributionArn: !Not [!Equals [!Ref CloudFrontDistributionArn, ""]]
+
+Resources:
+  #==================================
+  # Execution role: logs + Bedrock invoke
+  #==================================
+  JudgeFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectPrefix}-judge-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Global inference profile fans out across regions, so allow the
+              # foundation-model ARNs in the regions the APAC/Global profile can
+              # route to, plus the inference-profile ARN itself.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/${JudgeModelId}"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*anthropic.claude-haiku-4-5*"
+
+  #==================================
+  # Judge Lambda
+  #==================================
+  JudgeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-quiz-judge"
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt JudgeFunctionRole.Arn
+      Timeout: 29
+      MemorySize: 256
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          BEDROCK_REGION: !Ref AWS::Region
+          JUDGE_MODEL_ID: !Ref JudgeModelId
+          ORIGIN_SECRET: !Ref OriginSecret
+      Code:
+        ZipFile: |
+          # Placeholder. Real code is deployed by the deploy script, which
+          # updates the function code from deploy/judge/handler.py after the
+          # stack creates the function. This inline stub keeps the template
+          # self-contained and valid on first create.
+          import json
+          def handler(event, context):
+              return {"statusCode": 503,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "judge code not yet published"})}
+
+  #==================================
+  # Function URL (IAM auth) — only CloudFront (OAC) may call it
+  #==================================
+  JudgeFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref JudgeFunction
+      AuthType: AWS_IAM
+      InvokeMode: BUFFERED
+      # NB: Function URL CORS AllowMethods does not accept OPTIONS (preflight is
+      # handled automatically). Listing it fails CloudFormation early validation.
+      Cors:
+        AllowOrigins: ["*"]
+        AllowMethods: ["POST"]
+        AllowHeaders: ["content-type", "x-origin-secret"]
+        MaxAge: 300
+
+  # Allow the CloudFront service principal to invoke the Function URL. When the
+  # distribution ARN is supplied, scope to that exact distribution via
+  # aws:SourceArn (the pattern AWS documents for OAC + Lambda); otherwise fall
+  # back to SourceAccount for the first create before the distribution exists.
+  JudgeUrlCloudFrontPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref JudgeFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      FunctionUrlAuthType: AWS_IAM
+      SourceArn: !If [HasDistributionArn, !Ref CloudFrontDistributionArn, !Ref "AWS::NoValue"]
+      SourceAccount: !If [HasDistributionArn, !Ref "AWS::NoValue", !Ref "AWS::AccountId"]
+
+  # OAC-signed invocation also requires lambda:InvokeFunction (confirmed against
+  # the AWS "Restrict access to a Lambda function URL origin" guide, which grants
+  # BOTH actions). Without this, every request is rejected 403 before the
+  # function runs, even though InvokeFunctionUrl is granted.
+  JudgeInvokeCloudFrontPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref JudgeFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !If [HasDistributionArn, !Ref CloudFrontDistributionArn, !Ref "AWS::NoValue"]
+      SourceAccount: !If [HasDistributionArn, !Ref "AWS::NoValue", !Ref "AWS::AccountId"]
+
+Outputs:
+  JudgeFunctionName:
+    Description: Name of the judge Lambda (deploy script publishes code to it)
+    Value: !Ref JudgeFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-JudgeFunctionName"
+
+  JudgeFunctionUrl:
+    Description: Full Function URL (https://...)
+    Value: !GetAtt JudgeFunctionUrl.FunctionUrl
+
+  JudgeFunctionUrlDomain:
+    Description: Host portion of the Function URL, used as a CloudFront origin domain
+    Value: !Select [2, !Split ["/", !GetAtt JudgeFunctionUrl.FunctionUrl]]
+    Export:
+      Name: !Sub "${AWS::StackName}-JudgeFunctionUrlDomain"
