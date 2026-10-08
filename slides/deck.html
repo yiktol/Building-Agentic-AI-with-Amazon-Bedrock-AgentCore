@@ -307,7 +307,7 @@
       if (ab) ab.addEventListener("click", (e) => { e.currentTarget.blur(); setAutoplay(!autoplayOn); });
       // Read-and-reset the autoplay one-shot flag first, before playCurrent runs,
       // so a late "ended" from the outgoing audio cannot chain a second advance.
-      Reveal.on("slidechanged", () => { const wasAuto = advancingViaAutoplay; advancingViaAutoplay = false; void wasAuto; });
+      Reveal.on("slidechanged", () => { const wasAuto = advancingViaAutoplay; advancingViaAutoplay = false; if (!wasAuto && autoplayOn) setAutoplay(false); });
       Reveal.on("ready", playCurrent); Reveal.on("slidechanged", playCurrent);
     }
     function toggleFullscreen() { const el = document.documentElement; const isFs = document.fullscreenElement || document.webkitFullscreenElement; if (!isFs) { (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); } else { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); } }
