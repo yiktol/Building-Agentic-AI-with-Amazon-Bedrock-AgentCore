@@ -304,7 +304,7 @@ fi
 if ! $CONTENT_ONLY; then
   log "Validating templates with cfn-lint (if available)"
   if command -v cfn-lint >/dev/null; then
-    cfn-lint "$ROOT_TEMPLATE" "$S3_TEMPLATE" "$CLOUDFRONT_TEMPLATE" "$ASSISTANT_TEMPLATE" || {
+    cfn-lint "$ROOT_TEMPLATE" "$S3_TEMPLATE" "$CLOUDFRONT_TEMPLATE" "$JUDGE_TEMPLATE" "$ASSISTANT_TEMPLATE" || {
       # cfn-lint exit 4 = warnings only; treat as non-fatal
       [[ $? -eq 4 ]] || { err "cfn-lint reported errors"; exit 1; }
     }

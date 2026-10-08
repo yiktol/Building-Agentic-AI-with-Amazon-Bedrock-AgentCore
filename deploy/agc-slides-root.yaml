@@ -57,16 +57,17 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Bedrock Knowledge Base id threaded into the assistant. Empty => the
-      assistant renders 503 "not configured". Re-derived by the deploy script
-      from the sibling KB stack only when its ingestion sentinel is COMPLETE.
+      Bedrock Knowledge Base id threaded into both the judge and the assistant.
+      Empty => each renders 503 "not configured". Re-derived by the deploy
+      script from the sibling KB stack only when its ingestion sentinel is
+      COMPLETE.
 
   KnowledgeBaseArn:
     Type: String
     Default: ""
     Description: >-
-      Knowledge Base ARN threaded into the assistant's conditional
-      bedrock:Retrieve grant. Empty => no retrieval grant.
+      Knowledge Base ARN threaded into both the judge's and the assistant's
+      conditional bedrock:Retrieve grant. Empty => no retrieval grant.
 
   EmbeddingModelId:
     Type: String
@@ -202,6 +203,9 @@ Resources:
         JudgeModelId: !Ref JudgeModelId
         OriginSecret: !Ref OriginSecret
         CloudFrontDistributionArn: !Ref JudgeDistributionArn
+        KnowledgeBaseId: !Ref KnowledgeBaseId
+        KnowledgeBaseArn: !Ref KnowledgeBaseArn
+        EmbeddingModelId: !Ref EmbeddingModelId
       Tags:
         - Key: Name
           Value: !Sub '${ProjectPrefix}-JudgeStack'

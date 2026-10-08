@@ -42,8 +42,30 @@ Parameters:
       (aws:SourceArn), per AWS guidance. Leave empty on the very first create
       (before the distribution exists); set it on the next deploy.
 
+  KnowledgeBaseId:
+    Type: String
+    Default: ""
+    Description: >-
+      Project-level Bedrock Knowledge Base id. Empty (default) => the judge
+      returns "not configured" (503) until a KB id is wired. Set by the deploy
+      script only after the KB stack exists AND its ingestion is COMPLETE.
+
+  KnowledgeBaseArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the Knowledge Base. When non-empty, the conditional
+      JudgeKbPolicy grants bedrock:Retrieve scoped to this ARN. Empty => no
+      retrieval grant.
+
+  EmbeddingModelId:
+    Type: String
+    Default: cohere.embed-english-v3
+    Description: Embedding model id (for the scoped bedrock:InvokeModel grant).
+
 Conditions:
   HasDistributionArn: !Not [!Equals [!Ref CloudFrontDistributionArn, ""]]
+  HasKnowledgeBase: !Not [!Equals [!Ref KnowledgeBaseArn, ""]]
 
 Resources:
   #==================================
@@ -80,6 +102,28 @@ Resources:
                   - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*anthropic.claude-haiku-4-5*"
 
   #==================================
+  # KB retrieval grant — SEPARATE conditional policy so the base role is
+  # identical when the KB is empty. Renders only when KnowledgeBaseArn is
+  # non-empty.
+  #==================================
+  JudgeKbPolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasKnowledgeBase
+    Properties:
+      PolicyName: BedrockRetrieve
+      Roles:
+        - !Ref JudgeFunctionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: bedrock:Retrieve
+            Resource: !Ref KnowledgeBaseArn
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+
+  #==================================
   # Judge Lambda
   #==================================
   JudgeFunction:
@@ -97,6 +141,7 @@ Resources:
           BEDROCK_REGION: !Ref AWS::Region
           JUDGE_MODEL_ID: !Ref JudgeModelId
           ORIGIN_SECRET: !Ref OriginSecret
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
       Code:
         ZipFile: |
           # Placeholder. Real code is deployed by the deploy script, which
