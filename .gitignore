@@ -10,6 +10,9 @@ aws-icons/
 # KB corpus staging (deploy-time artifact produced by deploy/kb/build_corpus.sh)
 deploy/kb/.staging/
 
+# Agent workflow task artifacts (plans, reviews, verification notes)
+.agents/
+
 
 # C extensions
 *.so
