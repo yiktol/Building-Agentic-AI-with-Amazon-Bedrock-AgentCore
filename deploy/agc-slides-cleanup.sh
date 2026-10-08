@@ -71,45 +71,36 @@ empty_versioned_bucket() {
     log "Bucket ${bucket} not present or not accessible; skipping empty step."
     return 0
   fi
-  log "Emptying bucket (current objects): s3://${bucket}"
-  aws s3 rm "s3://${bucket}" --recursive --region "$REGION" >/dev/null 2>&1 || warn "current-object delete had issues"
+  log "Removing all objects, versions, and delete markers: s3://${bucket}"
+  # Use boto3's list_object_versions paginator to clear a versioned bucket
+  # completely in batches of 1000. This is more robust than driving the AWS CLI
+  # paginator from shell with JMESPath, which previously bailed out partway and
+  # left versions/delete-markers behind — causing CloudFormation to fail the
+  # bucket (and thus the whole stack) deletion.
+  python3 - "$bucket" "$REGION" <<'PY' || warn "bucket empty step reported an error"
+import sys
+import boto3
+from botocore.exceptions import ClientError
 
-  log "Removing all object versions and delete markers: s3://${bucket}"
-  # Page through list-object-versions (at most 1000 keys per page). Each page is
-  # written to a temp file in the {"Objects":[...]} shape delete-objects expects,
-  # then passed via file:// (avoids arg-quoting issues). Pagination is driven by
-  # --starting-token / NextToken so both Versions[] and DeleteMarkers[] on every
-  # page are cleared.
-  local batch token
-  batch="$(mktemp)"
-  token=""
-  while true; do
-    if [[ -n "$token" ]]; then
-      aws s3api list-object-versions \
-        --bucket "$bucket" --region "$REGION" --max-items 1000 --starting-token "$token" \
-        --query '{Objects: ((Versions || `[]`)[].{Key:Key,VersionId:VersionId}) + ((DeleteMarkers || `[]`)[].{Key:Key,VersionId:VersionId}), Quiet: `true`, NextToken: NextToken}' \
-        --output json > "$batch" 2>/dev/null || { warn "list-object-versions failed"; break; }
-    else
-      aws s3api list-object-versions \
-        --bucket "$bucket" --region "$REGION" --max-items 1000 \
-        --query '{Objects: ((Versions || `[]`)[].{Key:Key,VersionId:VersionId}) + ((DeleteMarkers || `[]`)[].{Key:Key,VersionId:VersionId}), Quiet: `true`, NextToken: NextToken}' \
-        --output json > "$batch" 2>/dev/null || { warn "list-object-versions failed"; break; }
-    fi
-
-    local count
-    count="$(python3 -c 'import sys,json; print(len((json.load(open(sys.argv[1])).get("Objects") or [])))' "$batch" 2>/dev/null || echo 0)"
-
-    if [[ "$count" -gt 0 ]]; then
-      aws s3api delete-objects --bucket "$bucket" --region "$REGION" \
-        --delete "file://${batch}" >/dev/null 2>&1 || { warn "delete-objects batch failed"; break; }
-      log "  removed ${count} versions/markers"
-    fi
-
-    # Advance to the next page; stop when the CLI reports no NextToken.
-    token="$(python3 -c 'import sys,json; v=json.load(open(sys.argv[1])).get("NextToken"); print(v or "")' "$batch" 2>/dev/null || echo "")"
-    [[ -n "$token" ]] || break
-  done
-  rm -f "$batch"
+bucket, region = sys.argv[1], sys.argv[2]
+s3 = boto3.client("s3", region_name=region)
+paginator = s3.get_paginator("list_object_versions")
+total = 0
+try:
+    for page in paginator.paginate(Bucket=bucket):
+        objs = [{"Key": v["Key"], "VersionId": v["VersionId"]} for v in page.get("Versions", [])]
+        objs += [{"Key": m["Key"], "VersionId": m["VersionId"]} for m in page.get("DeleteMarkers", [])]
+        for i in range(0, len(objs), 1000):
+            chunk = objs[i:i + 1000]
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": chunk, "Quiet": True})
+            total += len(chunk)
+except ClientError as e:
+    if e.response.get("Error", {}).get("Code") == "NoSuchBucket":
+        print(f"  bucket {bucket} already gone")
+        sys.exit(0)
+    raise
+print(f"  removed {total} objects/versions/markers")
+PY
 }
 
 # ------------------------------------------------------------- confirmation ---
@@ -190,6 +181,7 @@ elif [[ -n "$BUCKET_NAME" && "$BUCKET_NAME" != "None" ]]; then
   aws s3 rm "s3://${BUCKET_NAME}/${PREFIX}/s3.yaml"         --region "$REGION" 2>/dev/null || true
   aws s3 rm "s3://${BUCKET_NAME}/${PREFIX}/cloudfront.yaml" --region "$REGION" 2>/dev/null || true
   aws s3 rm "s3://${BUCKET_NAME}/${PREFIX}/judge.yaml"      --region "$REGION" 2>/dev/null || true
+  aws s3 rm "s3://${BUCKET_NAME}/${PREFIX}/assistant.yaml"  --region "$REGION" 2>/dev/null || true
 else
   warn "Could not resolve staging bucket from SSM; skipping template cleanup."
 fi
