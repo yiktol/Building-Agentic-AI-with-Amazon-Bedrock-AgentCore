@@ -64,6 +64,7 @@
     .deck-topbar a.secondary, .deck-topbar .topbar-btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.5); margin-right: 8px; }
     .deck-topbar .topbar-btn { font-family: inherit; font-size: 14px; font-weight: 600; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
     .deck-topbar .topbar-btn:hover { background: rgba(255,255,255,0.15); }
+    .deck-topbar .topbar-btn.on { background: var(--aws-orange); color: var(--aws-navy); border-color: var(--aws-orange); }
     .reveal .slides { margin-top: 20px; }
     .loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font-family: "Inter", system-ui, sans-serif; color: var(--aws-navy); }
 
@@ -91,6 +92,7 @@
       <a class="secondary" href="index.html">All modules</a>
       <button id="tocBtn" class="topbar-btn" type="button" title="Jump to slide (T)">&#9776; Slides</button>
       <button id="narrationBtn" class="topbar-btn" type="button" title="Toggle narration">&#128263; Narration: Off</button>
+      <button id="autoplayBtn" class="topbar-btn" type="button" title="Auto-advance to the next slide when narration finishes">&#9654; Autoplay: Off</button>
       <button id="fullscreenBtn" class="topbar-btn" type="button" title="Toggle fullscreen (F)">&#9187; Fullscreen</button>
     </div>
   </div>
@@ -243,22 +245,53 @@
         navigationMode: "linear", plugins: [RevealNotes, RevealMarkdown],
         keyboard: { 33: "prev", 34: "next", 32: "next", 37: "prev", 38: "prev", 39: "next", 40: "next",
           36: () => Reveal.slide(0), 35: () => Reveal.slide(Reveal.getTotalSlides() - 1),
-          66: "togglePause", 190: "togglePause", 84: () => toggleTOC() },
+          66: "togglePause", 190: "togglePause", 84: () => toggleTOC(),
+          65: () => setAutoplay(!autoplayOn), 78: () => setNarration(!narrationOn) },
       });
       Reveal.on("slidechanged", highlightTOC);
     }
-    let narrationOn = false, audioUnlocked = false;
+    let narrationOn = false, audioUnlocked = false, autoplayOn = false;
+    // One-shot flag: set true immediately before an autoplay-initiated Reveal.next(),
+    // then read-and-reset at the start of the slidechanged handler so a stale
+    // "ended" event from the outgoing audio can never trigger a second advance.
+    let advancingViaAutoplay = false;
     function allAudioEls() { return Array.from(document.querySelectorAll("audio.slide-audio")); }
-    function stopAllAudio(except) { allAudioEls().forEach((a) => { if (a !== except) { a.pause(); try { a.currentTime = 0; } catch (e) {} } }); }
+    function stopAllAudio(except) { allAudioEls().forEach((a) => { if (a !== except) { a.pause(); try { a.currentTime = 0; } catch (e) {} a.onended = null; } }); }
     function currentAudioEl() { const s = Reveal.getCurrentSlide(); return s ? s.querySelector("audio.slide-audio") : null; }
+    function isLastSlide() { const i = Reveal.getIndices(); const n = Reveal.getTotalSlides(); return (i.h + 1) >= n; }
     function playCurrent() {
       stopAllAudio(currentAudioEl()); if (!narrationOn) return;
       const a = currentAudioEl(); if (!a) return;
       try { a.currentTime = 0; } catch (e) {}
+      // Auto-advance: when this narration ends, move to the next slide (which
+      // triggers slidechanged -> playCurrent, continuing the chain). The handler
+      // is re-bound each time playCurrent runs; stopAllAudio clears stale ones so
+      // manual navigation never double-fires an advance. The advancingViaAutoplay
+      // one-shot flag (read-and-reset in slidechanged) is the authoritative guard.
+      a.onended = () => {
+        if (autoplayOn && narrationOn && !isLastSlide()) { advancingViaAutoplay = true; Reveal.next(); }
+      };
       const p = a.play();
       if (p && typeof p.catch === "function") p.then(() => { audioUnlocked = true; hideUnlockHint(); }).catch(() => { if (!audioUnlocked) showUnlockHint(); });
+      // Preload the next slide's audio while this one narrates (autoplay only) so
+      // the auto-advance gap is seamless. Only ever warms the immediate next clip.
+      if (autoplayOn && narrationOn && !isLastSlide()) {
+        const slides = Reveal.getSlides();
+        const next = slides[Reveal.getIndices().h + 1];
+        const nextAudio = next ? next.querySelector("audio.slide-audio") : null;
+        if (nextAudio) { nextAudio.preload = "auto"; try { nextAudio.load(); } catch (e) {} }
+      }
     }
     function setNarration(on) { narrationOn = on; const b = document.getElementById("narrationBtn"); if (b) b.innerHTML = on ? "&#128266; Narration: On" : "&#128263; Narration: Off"; if (on) playCurrent(); else stopAllAudio(null); }
+    function setAutoplay(on) {
+      autoplayOn = on;
+      const b = document.getElementById("autoplayBtn");
+      if (b) { b.innerHTML = on ? "&#9654; Autoplay: On" : "&#9654; Autoplay: Off"; b.classList.toggle("on", on); }
+      // Turning autoplay on is only useful with narration — enable it too, and
+      // (re)bind the ended handler on the current slide's audio via playCurrent.
+      if (on && !narrationOn) { setNarration(true); }
+      else if (on) { playCurrent(); }
+    }
     function showUnlockHint() {
       let h = document.getElementById("narrationHint"); if (h) return;
       h = document.createElement("button"); h.id = "narrationHint"; h.type = "button"; h.textContent = "🔊 Click to enable narration";
@@ -267,7 +300,16 @@
       document.body.appendChild(h);
     }
     function hideUnlockHint() { const h = document.getElementById("narrationHint"); if (h) h.remove(); }
-    function initNarration() { const b = document.getElementById("narrationBtn"); if (b) b.addEventListener("click", (e) => { e.currentTarget.blur(); setNarration(!narrationOn); }); Reveal.on("ready", playCurrent); Reveal.on("slidechanged", playCurrent); }
+    function initNarration() {
+      const b = document.getElementById("narrationBtn");
+      if (b) b.addEventListener("click", (e) => { e.currentTarget.blur(); setNarration(!narrationOn); });
+      const ab = document.getElementById("autoplayBtn");
+      if (ab) ab.addEventListener("click", (e) => { e.currentTarget.blur(); setAutoplay(!autoplayOn); });
+      // Read-and-reset the autoplay one-shot flag first, before playCurrent runs,
+      // so a late "ended" from the outgoing audio cannot chain a second advance.
+      Reveal.on("slidechanged", () => { const wasAuto = advancingViaAutoplay; advancingViaAutoplay = false; void wasAuto; });
+      Reveal.on("ready", playCurrent); Reveal.on("slidechanged", playCurrent);
+    }
     function toggleFullscreen() { const el = document.documentElement; const isFs = document.fullscreenElement || document.webkitFullscreenElement; if (!isFs) { (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el); } else { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); } }
     document.getElementById("fullscreenBtn").addEventListener("click", (e) => { e.currentTarget.blur(); toggleFullscreen(); });
     function updateFsLabel() { const isFs = document.fullscreenElement || document.webkitFullscreenElement; document.getElementById("fullscreenBtn").innerHTML = isFs ? "&#9187; Exit fullscreen" : "&#9187; Fullscreen"; }
