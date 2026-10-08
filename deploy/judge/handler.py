@@ -30,6 +30,170 @@ _bedrock = boto3.client(
     config=Config(retries={"max_attempts": 2, "mode": "standard"}, read_timeout=25),
 )
 
+# --- Project-level Knowledge Base retrieval (additive, fail-open) -----------
+# When KNOWLEDGE_BASE_ID is empty (the default), NO KB client is created and the
+# retrieval/prompt-assembly path is byte-identical to the pre-KB handler: the
+# empty path never imports a bedrock-agent-runtime client and never changes the
+# single-element `system` list passed to converse.
+_KB_ID = os.environ.get("KNOWLEDGE_BASE_ID", "").strip()
+KB_NUM_RESULTS = int(os.environ.get("KB_NUM_RESULTS", "4"))
+KB_CONTEXT_CAP = 3000  # hard cap on the whole injected context block
+_kb_client = None  # lazily initialized, ONLY when _KB_ID is non-empty
+
+# Human-readable deck titles keyed by module number. Preferred label source for
+# `modules/MLAGAC-...-M0N-..._InstructorDeck.md` keys; the filename-derived
+# title is only a fallback when N is not in this map. Derived from this repo's
+# 6-module AgentCore course (slides/index.html authoritative titles).
+MODULE_TITLES = {
+    1: "Foundations of Agentic AI Patterns",
+    2: "AgentCore Runtime and Framework Integration",
+    3: "Security and Identity Management",
+    4: "Tool Integration and AgentCore Gateway",
+    5: "Agentic Memory Implementation",
+    6: "Production Monitoring and Observability",
+}
+
+# docs/* basenames -> fixed labels (module is None: labs/guides are not decks).
+_DOC_LABELS = {
+    "lab.md": "Hands-on Lab \u2014 Enhance and Scale Agents",
+}
+
+_MODULE_KEY_RE = re.compile(
+    r"^MLAGAC-\d+-EN-M0?(\d+)-(.+?)_InstructorDeck\.md$", re.I
+)
+
+# Cap on the number of distinct citations surfaced to the learner.
+_SOURCES_CAP = 3
+
+
+def _source_label(uri):
+    """Map a KB result's S3 URI to {"label": str, "module": int|None}, or None.
+
+    Pure + defensive (fail-open to no-source): a non-string, empty, or
+    unparseable/unknown URI returns None. Labels are derived ONLY from the key
+    (never from chunk content), so this helper cannot leak option text."""
+    if not isinstance(uri, str) or not uri.strip():
+        return None
+    # Strip a leading s3:// + bucket segment; accept a bare key too.
+    key = uri.strip()
+    if key.lower().startswith("s3://"):
+        rest = key[5:]
+        # drop the bucket (first path segment)
+        slash = rest.find("/")
+        key = rest[slash + 1:] if slash != -1 else ""
+    if not key:
+        return None
+    base = key.rsplit("/", 1)[-1]
+    if not base:
+        return None
+
+    m = _MODULE_KEY_RE.match(base)
+    if m:
+        module_num = int(m.group(1))
+        title = MODULE_TITLES.get(module_num)
+        if not title:
+            # Fall back to the filename-derived title. The [-_]+ character class
+            # is a deliberate deviation from the reference's _+ (a dead path for
+            # modules 1-6, since MODULE_TITLES always wins there).
+            title = re.sub(r"[-_]+", " ", m.group(2)).strip()
+        if not title:
+            return None
+        return {"label": f"Module {module_num} \u2014 {title}", "module": module_num}
+
+    doc_label = _DOC_LABELS.get(base.lower())
+    if doc_label:
+        return {"label": doc_label, "module": None}
+
+    return None
+
+
+def _map_sources(results):
+    """Map raw retrievalResults to a deduped, capped list of citation dicts.
+
+    Reads ONLY `result["location"]["s3Location"]["uri"]` (defensively), dedupes
+    by label preserving first-seen order (retrieve() returns ranked results, so
+    highest relevance wins), and caps to the top distinct sources."""
+    sources = []
+    seen = set()
+    for r in results or []:
+        try:
+            uri = r["location"]["s3Location"]["uri"]
+        except (TypeError, KeyError, IndexError):
+            continue
+        mapped = _source_label(uri)
+        if not mapped:
+            continue
+        label = mapped["label"]
+        if label in seen:
+            continue
+        seen.add(label)
+        sources.append(mapped)
+        if len(sources) >= _SOURCES_CAP:
+            break
+    return sources
+
+
+def _get_kb_client():
+    """Lazy singleton bedrock-agent-runtime client (created only when _KB_ID
+    is set). Tight timeouts + single attempt bound retrieval latency well
+    inside the converse/Lambda budget; retrieval always fails open."""
+    global _kb_client
+    if _kb_client is None:
+        _kb_client = boto3.client(
+            "bedrock-agent-runtime",
+            region_name=REGION,
+            config=Config(
+                retries={"max_attempts": 1, "mode": "standard"},
+                read_timeout=3,
+                connect_timeout=2,
+            ),
+        )
+    return _kb_client
+
+
+# Grounding note appended to CHOICE_SYSTEM only when retrieval returns context.
+CHOICE_KB_NOTE = (
+    "Use the course context below to ground your explanation; the expert "
+    "rationale remains authoritative. Do not contradict the rationale, and if "
+    "the context is irrelevant, ignore it. The wrong-answer no-leak rule above "
+    "still applies: never reveal, name, quote, or describe the correct option."
+)
+
+
+def _retrieve_context(prompt, pick):
+    """Retrieve course context for the pick, returning (context_text, sources).
+
+    FAIL-OPEN: returns ("", []) on ANY error / empty / malformed result, so
+    retrieval can never change a response's status code or body relative to the
+    non-KB path. `sources` are filename-derived citation dicts mapped from the
+    retrieval result locations (never from chunk content)."""
+    try:
+        # Independent caps so the picked option always contributes to the query
+        # even when the prompt is long (combined <= ~1001 chars).
+        query = (str(prompt)[:700] + " " + str(pick)[:300]).strip()
+        resp = _get_kb_client().retrieve(
+            knowledgeBaseId=_KB_ID,
+            retrievalQuery={"text": query},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {"numberOfResults": KB_NUM_RESULTS}
+            },
+        )
+        results = resp.get("retrievalResults") or []
+        chunks = []
+        for r in results:
+            text = (r.get("content") or {}).get("text") or ""
+            if text:
+                chunks.append(text[:1000])  # per-chunk cap so one can't crowd out
+        if not chunks:
+            print("[kb] INFO empty retrieval results")
+            return "", []
+        context_text = ("\n---\n".join(chunks))[:KB_CONTEXT_CAP]
+        return context_text, _map_sources(results)
+    except Exception as e:
+        print(f"[kb] WARN retrieval failed: {type(e).__name__}")
+        return "", []
+
+
 CORS = {
     "Content-Type": "application/json",
     # Same-origin in production (served under the same CloudFront domain), so a
@@ -95,6 +259,150 @@ def _clean_json(text):
     return json.loads(t)
 
 
+# --- shared leak-guard primitives (imported by eval_judge.py) ---------------
+# SINGLE SOURCE OF TRUTH (FR6.4): eval_judge.py imports exactly these helpers +
+# constants so the harness oracle and the Lambda's runtime decision are the
+# SAME code — no reimplemented normalization.
+#
+# FIX 3 — conservative, safe-WITHOUT-tuning thresholds:
+#   NGRAM_N is the PRIMARY verbatim-span guard (consecutive content-token span);
+#   OVERLAP_THRESHOLD is ADVISORY/SECONDARY (near-verbatim ratio only).
+#   FAIL-SAFE direction is DOWN: lowering NGRAM_N and/or OVERLAP_THRESHOLD
+#   over-blocks (safe). G1 "no wrong-pick answer leak" is a HARD INVARIANT, not
+#   a tunable-later knob. Any UPWARD tuning must be validated against the
+#   eval_judge.py --live Haiku run (NOT mock output); the mocked CI test asserts
+#   mechanism/shape only. The shipped NGRAM_N=4 is the conservative default.
+_STOPWORDS = {
+    "a", "an", "the", "of", "to", "is", "are", "and", "or", "in",
+    "on", "for", "that", "this", "it", "as", "by", "with",
+}
+
+OVERLAP_THRESHOLD = 0.85   # SECONDARY/advisory near-verbatim ratio (eval-tuned)
+NGRAM_N = 4                # PRIMARY verbatim consecutive-content-token span
+
+_VERDICT_WORDS = {"answer", "correct", "right", "option", "choice"}
+
+
+def _normalize(s):
+    """lowercase, collapse whitespace runs, strip. (shared with eval oracle)"""
+    return re.sub(r"\s+", " ", str(s).lower()).strip()
+
+
+def _tokens(s):
+    """ordered [a-z0-9]+ tokens (shared with eval oracle)."""
+    return re.findall(r"[a-z0-9]+", str(s).lower())
+
+
+def _content_tokens(s):
+    """_tokens(s) with _STOPWORDS removed, order preserved (shared)."""
+    return [t for t in _tokens(s) if t not in _STOPWORDS]
+
+
+def _parse_answer(answer):
+    """'<L>. <text>' -> (answer_letter_upper, answer_text); ('', answer) when
+    there is no '. ' separator (shared with eval oracle)."""
+    s = str(answer)
+    idx = s.find(". ")
+    if idx == -1:
+        return "", s
+    letter = s[:idx].strip().upper()
+    text = s[idx + 2:]
+    return letter, text
+
+
+def _leak_guard(explanation, answer, correct):
+    """True iff `explanation` leaks the correct option on a WRONG pick.
+
+    No-op (returns False) unless `correct is False`. Pure function of its three
+    args — never touches the KB, env, or request beyond `answer` — so it runs
+    identically on the KB and non-KB paths (FR4.4).
+
+    SUPERSET-SAFE (FIX 2): the guard must return False for ANY explanation the
+    pre-change handler would have returned 200 for, UNLESS a GENUINE leak is
+    present. "Byte-identical to today" is scoped to retrieval + prompt
+    assembly only — this guard now gates wrong-pick 200s, so the response path
+    is NOT claimed byte-identical. The two FIX-2 tests in test_handler.py
+    enforce the non-regression (existing wrong-pick still 200; empty-letter
+    wrong-pick 200)."""
+    if correct is not False:
+        return False
+
+    answer_letter, answer_text = _parse_answer(answer)
+    expl_raw = str(explanation)
+    expl_norm = _normalize(expl_raw)
+    expl_tokens = _tokens(expl_raw)
+    expl_content = _content_tokens(expl_raw)
+
+    # Rule 1 — letter-as-answer (explicit option-reference forms ONLY).
+    # FIX 1: guard ALL answer_letter rules behind `if answer_letter:` — a
+    # letterless answer (e.g. "4") must NOT trip on the bare words
+    # option/answer/choice.
+    if answer_letter:
+        L = re.escape(answer_letter)
+        letter_patterns = [
+            r"\b(option|choice|answer)\s+" + L + r"\b",
+            r"\b" + L + r"\s+is\s+(correct|right|the\s+answer)\b",
+            r"\(" + L + r"\)",
+        ]
+        for pat in letter_patterns:
+            if re.search(pat, expl_raw, flags=re.I):
+                return True
+
+    # Rule 2 — answer-text overlap (SECONDARY, near-verbatim restatement only).
+    answer_content = _content_tokens(answer_text)
+    if len(answer_content) >= 3:
+        expl_content_set = set(expl_content)
+        answer_set = set(answer_content)
+        overlap = len(expl_content_set & answer_set) / len(answer_set)
+        if overlap >= OVERLAP_THRESHOLD:
+            return True
+
+    # Rule 3 — verbatim n-gram / short-answer containment (PRIMARY verbatim).
+    if len(answer_content) < 3:
+        # Short answers (e.g. "4", "Amazon S3"): leak only when EVERY content
+        # token appears as a whole normalized token AND at least one is adjacent
+        # to a verdict word. FIX 1: this verdict-adjacency letter path is only
+        # taken when answer_letter is non-empty — a bare "4" with no verdict
+        # word nearby does NOT trip.
+        if answer_letter and answer_content:
+            expl_set = set(expl_tokens)
+            if all(tok in expl_set for tok in answer_content):
+                for tok in answer_content:
+                    adj = (
+                        r"\b(answer|correct|right|option|choice)\s+\w*\s*"
+                        + re.escape(tok) + r"\b"
+                    )
+                    adj2 = (
+                        r"\b" + re.escape(tok)
+                        + r"\s+is\s+(correct|right|the\s+answer)\b"
+                    )
+                    if re.search(adj, expl_norm) or re.search(adj2, expl_norm):
+                        return True
+    else:
+        # Longer answers (>= 3 content tokens): leak if any NGRAM_N consecutive
+        # content tokens of answer_text appear verbatim as consecutive whole
+        # tokens in the explanation.
+        if len(expl_content) >= NGRAM_N:
+            expl_ngrams = {
+                tuple(expl_content[i:i + NGRAM_N])
+                for i in range(len(expl_content) - NGRAM_N + 1)
+            }
+            for i in range(len(answer_content) - NGRAM_N + 1):
+                if tuple(answer_content[i:i + NGRAM_N]) in expl_ngrams:
+                    return True
+
+    # Rule 4 — explicit reveal phrases.
+    reveal_phrases = (
+        "the correct answer", "the right option", "the right answer",
+        "you should have picked", "the answer is", "correct option is",
+    )
+    for phrase in reveal_phrases:
+        if phrase in expl_norm:
+            return True
+
+    return False
+
+
 def handler(event, context):
     method = (
         event.get("requestContext", {}).get("http", {}).get("method")
@@ -152,10 +460,18 @@ def handler(event, context):
             correct=correct_txt, attempt=attempt, tried=tried_txt,
             answer=answer, why=why,
         )
+        # Additive KB grounding (fail-open). When _KB_ID is empty, no retrieval
+        # happens and `system` stays byte-identical to [{"text": CHOICE_SYSTEM}].
+        context_block, sources = _retrieve_context(prompt, pick) if _KB_ID else ("", [])
+        system_text = CHOICE_SYSTEM
+        if context_block:
+            system_text = (
+                CHOICE_SYSTEM + "\n\n" + CHOICE_KB_NOTE + "\n\n" + context_block
+            )
         try:
             out = _bedrock.converse(
                 modelId=MODEL_ID,
-                system=[{"text": CHOICE_SYSTEM}],
+                system=[{"text": system_text}],
                 messages=[{"role": "user", "content": [{"text": user}]}],
                 inferenceConfig={"maxTokens": 320, "temperature": 0},
             )
@@ -166,6 +482,18 @@ def handler(event, context):
         explanation = str(parsed.get("explanation", "")).strip()[:800]
         if not explanation:
             return _resp(502, {"error": "judge returned empty explanation"})
-        return _resp(200, {"mode": "choice", "explanation": explanation, "model": MODEL_ID})
+        # No-leak guard: on a WRONG pick only, block any explanation that reveals
+        # the correct option. This is the ONE place we fail CLOSED (G1 outranks
+        # availability on a wrong pick): an internal guard exception -> 502. The
+        # front-end treats any non-200 as "use the local hint" (safe fallback),
+        # so tripping degrades gracefully with zero front-end change.
+        if correct is False:
+            try:
+                tripped = _leak_guard(explanation, answer, correct)
+            except Exception:
+                tripped = True
+            if tripped:
+                return _resp(502, {"error": "judge guard tripped"})
+        return _resp(200, {"mode": "choice", "explanation": explanation, "model": MODEL_ID, "sources": sources})
 
     return _resp(400, {"error": f"unsupported mode: {mode}"})
