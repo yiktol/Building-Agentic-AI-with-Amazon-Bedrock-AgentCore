@@ -31,6 +31,48 @@
       "answer": "Use a hybrid approach with local hosting for calculation tools and remote hosting for shared data services",
       "answerLetter": "C",
       "why": "The correct answer is C: use a hybrid approach, with local hosting for the calculation tools and remote hosting for the shared data services. Let's review why. Option A, hosting all servers remotely, is incorrect, because it would add unnecessary latency to the frequent mathematical calculations. Option B, hosting all servers locally, is incorrect, because it would limit the ability to share tools across agents and to access the enterprise data services. Option C is correct, because local hosting provides minimal latency, which is ideal for the frequent calculations, while remote hosting enables shared tools across multiple agents, which is necessary for the enterprise data services managed by another team, and it also lets different teams use their preferred technologies. And option D, deploying everything as Lambda functions through Gateway, is incorrect, because Lambda would not provide the lowest latency for frequent calculations and carries execution-time limitations."
+    },
+    {
+      "id": "m4q3",
+      "prompt": "A team is tired of writing a custom integration for every combination of AI model and backend service. Which statement best describes the Model Context Protocol (MCP) and the problem it addresses?",
+      "options": [
+        "MCP is an AWS-proprietary protocol that only works with Amazon Bedrock.",
+        "MCP is a foundation model that is specially optimized for tool calling.",
+        "MCP is an open standard providing a universal interface between AI models and external tools, which solves the N-by-M integration problem and is often likened to \"USB-C for AI\".",
+        "MCP removes the need for authentication by exposing all tools publicly."
+      ],
+      "answerIndex": 2,
+      "answer": "MCP is an open standard providing a universal interface between AI models and external tools, which solves the N-by-M integration problem and is often likened to \"USB-C for AI\".",
+      "answerLetter": "C",
+      "why": "The correct answer is C: MCP is an open standard providing a universal interface between AI models and external tools, which solves the N-by-M integration problem and is often likened to USB-C for AI. Let's review why. Option A is incorrect, because MCP is an open standard developed by Anthropic, not an AWS-proprietary protocol; AWS supports it precisely for interoperability. Option B is incorrect, because MCP is a protocol with a client-server architecture using JSON-RPC, not a foundation model. Option C is correct, because the module defines MCP as a uniform interface for connecting AI systems to external tools, data sources, and services, which replaces writing a custom integration for each model-to-service combination, the N-by-M problem, and compares it to USB-C for AI. Option D is incorrect, because MCP does not eliminate authentication; Gateway and Identity still handle security, while MCP standardizes the interface."
+    },
+    {
+      "id": "m4q4",
+      "prompt": "A developer is configuring an AgentCore Gateway and needs to connect it to a specific Lambda function and a REST API, each with its own authentication requirements. Which Gateway component represents those configurable connections to the backing tools?",
+      "options": [
+        "Authorizers, because they validate the backend tool connections.",
+        "The service role, because it represents the connection to each individual tool.",
+        "The gateway endpoint itself, because it is the per-tool connection the agent calls.",
+        "Targets, the configurable endpoints that connect the gateway to tools (REST APIs, Lambda functions, or MCP servers), each with its own location, auth requirements, and transformation rules."
+      ],
+      "answerIndex": 3,
+      "answer": "Targets, the configurable endpoints that connect the gateway to tools (REST APIs, Lambda functions, or MCP servers), each with its own location, auth requirements, and transformation rules.",
+      "answerLetter": "D",
+      "why": "The correct answer is D: targets, the configurable endpoints that connect the gateway to tools such as REST APIs, Lambda functions, or MCP servers, each with its own location, auth requirements, and transformation rules. Let's review why. Option A is incorrect, because authorizers are the inbound security mechanism, typically custom JWT validation with OAuth discovery URLs, that govern who may access the gateway, not the backend tool connections. Option B is incorrect, because the service role is the IAM role that lets the gateway access AWS resources, not a per-tool endpoint. Option C is incorrect, because the gateway endpoint is the single managed MCP entry point that agents call inbound, not the individual connections to each backing tool. Option D is correct, because targets are precisely the configurable endpoints that link the gateway to each tool, and each target specifies its location, authentication requirements, and request transformation, so you can even attach different credential providers to individual targets."
+    },
+    {
+      "id": "m4q5",
+      "prompt": "A team must guarantee that a restricted tool call can never be allowed if any forbid rule applies, and that a tool call with no matching rule is blocked. How does AgentCore Policy evaluate such calls?",
+      "options": [
+        "With default-allow semantics, where any request that is not explicitly forbidden is permitted.",
+        "Cedar policies evaluate with default-deny semantics and a forbid-overrides-permit model, so an unmatched request is denied and any matching forbid always overrides a permit.",
+        "With a permit-overrides-forbid model, so a matching permit wins over a matching forbid.",
+        "With a proprietary AWS policy language, evaluated after the tool call has already completed."
+      ],
+      "answerIndex": 1,
+      "answer": "Cedar policies evaluate with default-deny semantics and a forbid-overrides-permit model, so an unmatched request is denied and any matching forbid always overrides a permit.",
+      "answerLetter": "B",
+      "why": "The correct answer is B: Cedar policies evaluate with default-deny semantics and a forbid-overrides-permit model, so an unmatched request is denied and any matching forbid always overrides a permit. Let's review why. Option A is incorrect, because AgentCore Policy is default-deny, not default-allow; if no policy matches a request, the result is deny. Option B is correct, because policies are written in the open-source Cedar language and all actions are denied by default, and Cedar uses forbid-overrides-permit, meaning a request is allowed only if at least one permit matches and no forbid matches, while any matching forbid forces a deny. Option C is incorrect, because the model is forbid-overrides-permit, so a forbid always beats a permit, not the other way around. Option D is incorrect, because Cedar is an open-source language, not proprietary, and evaluation happens at the AgentCore Gateway network boundary before the tool call executes, not after it completes."
     }
   ]
 }

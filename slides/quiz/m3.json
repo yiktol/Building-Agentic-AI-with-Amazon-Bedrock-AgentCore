@@ -31,6 +31,48 @@
       "answer": "Workload identity with multiple credential providers",
       "answerLetter": "A",
       "why": "The correct answer is A: a workload identity with multiple credential providers. Let's review why. Option A is correct, because workload identities serve as stable digital anchors that persist across environments and authentication schemes. They support multiple credential types simultaneously, such as IAM roles, OAuth 2.0 tokens, and API keys, and they abstract the complexity of managing those mechanisms behind a unified interface, which lets the agent maintain proper security boundaries while supporting both user-delegated and machine-to-machine authentication. Option B, a single shared API key, is incorrect, because sharing one key across all services violates the security boundaries between systems and cannot support user-delegated access. Option C, direct IAM role assumption for all external services, is incorrect, because IAM roles are specific to AWS and cannot authenticate directly with external services like Salesforce or ServiceNow. And option D, manual token management in agent code, is incorrect, because it increases security risk and complexity and ignores the centralized credential management that Identity provides."
+    },
+    {
+      "id": "m3q3",
+      "prompt": "An agent must perform an action on a specific user's behalf, which requires the user's explicit consent and keeps the user in control of their own data. Which authorization pattern applies, and how does AgentCore Identity support it?",
+      "options": [
+        "OAuth two-legged authentication (the client credentials grant), because it lets the application access resources on its own behalf.",
+        "SigV4 AWS Signature Version 4, because it validates AWS credentials for the user's request.",
+        "OAuth three-legged authentication (the authorization code grant), which implements user-delegated access with explicit user consent and session binding.",
+        "A shared API key credential provider, because the key captures the user's consent for each delegated action."
+      ],
+      "answerIndex": 2,
+      "answer": "OAuth three-legged authentication (the authorization code grant), which implements user-delegated access with explicit user consent and session binding.",
+      "answerLetter": "C",
+      "why": "The correct answer is C: OAuth three-legged authentication, the authorization code grant, which implements user-delegated access with explicit user consent and session binding. Let's review why. Option A is incorrect, because the OAuth two-legged client credentials grant is machine-to-machine, where an application accesses resources on its own behalf with no user consent, which does not fit acting on a specific user's behalf. Option B is incorrect, because SigV4 validates AWS credentials for AWS services and does not capture user-delegated consent to external resources. Option C is correct, because three-legged OAuth is exactly user-delegated access: the user provides explicit consent for the agent to act on their behalf, and AgentCore Identity uses session binding to verify that the user who starts the authorization request is the same user who grants consent. Option D is incorrect, because a shared API key is a static credential and does not capture per-user consent or delegation."
+    },
+    {
+      "id": "m3q4",
+      "prompt": "An interactive agent must authenticate end users who sign in through Amazon Cognito, passing a token in the Authorization header. Which inbound authentication method into AgentCore Runtime fits this requirement?",
+      "options": [
+        "IAM SigV4 signing, because it leverages existing AWS credentials and IAM policies for every caller.",
+        "JWT bearer token authentication, configured with an authorizer that specifies the identity provider's discovery URL and allowed clients, which works with Cognito and enterprise SSO.",
+        "Outbound OAuth client credentials, because that is how user tokens enter the agent.",
+        "An API key credential provider, because API keys are the standard way to sign users in."
+      ],
+      "answerIndex": 1,
+      "answer": "JWT bearer token authentication, configured with an authorizer that specifies the identity provider's discovery URL and allowed clients, which works with Cognito and enterprise SSO.",
+      "answerLetter": "B",
+      "why": "The correct answer is B: JWT bearer token authentication, configured with an authorizer that specifies the identity provider's discovery URL and allowed clients, which works with Cognito and enterprise SSO. Let's review why. Option A is incorrect, because IAM SigV4 signing leverages AWS credentials and IAM policies, which suits AWS-credentialed callers rather than end users signing in through Cognito and presenting a JWT. Option B is correct, because the module describes JWT bearer token authentication as accepting JSON Web Tokens from identity providers as bearer tokens in the Authorization header, where you configure an authorizer with the provider's discovery URL and allowed clients, and it supports Cognito and enterprise SSO, which matches this scenario exactly. Option C is incorrect, because OAuth client credentials is an outbound, machine-to-machine pattern, not an inbound user-authentication method. Option D is incorrect, because API keys are for outbound tool access and system-to-system calls, not inbound end-user sign-in."
+    },
+    {
+      "id": "m3q5",
+      "prompt": "A team integrates an agent with GitHub and Salesforce and wants to avoid hardcoding secrets and avoid repeatedly prompting the user for authorization. Which AgentCore Identity capability addresses this?",
+      "options": [
+        "Resource credential providers (with built-in providers for services like GitHub and Salesforce) plus the secure token vault, which stores credentials, injects them into outbound requests, and reduces repeated authorization prompts.",
+        "Storing the OAuth client secret in an environment variable inside the agent code.",
+        "Re-prompting the user for consent on every single tool call to the external service.",
+        "A single built-in provider that only supports SAML assertions."
+      ],
+      "answerIndex": 0,
+      "answer": "Resource credential providers (with built-in providers for services like GitHub and Salesforce) plus the secure token vault, which stores credentials, injects them into outbound requests, and reduces repeated authorization prompts.",
+      "answerLetter": "A",
+      "why": "The correct answer is A: resource credential providers, with built-in providers for services like GitHub and Salesforce, plus the secure token vault, which stores credentials, injects them into outbound requests, and reduces repeated authorization prompts. Let's review why. Option A is correct, because AgentCore Identity ships built-in providers for popular services such as Google, GitHub, Slack, and Salesforce, and the secure token vault stores user tokens, injects credentials into outbound requests so secrets stay out of your code, and reduces consent fatigue by not re-prompting the user each time. Option B is incorrect, because putting the client secret in an environment variable hardcodes a secret in the agent, which is the opposite of what the vault is designed to prevent. Option C is incorrect, because re-prompting on every tool call is exactly the consent fatigue the vault is meant to reduce. Option D is incorrect, because Identity supports multiple providers and multiple credential types, including OAuth 2.0 access tokens and API keys, not a single SAML-only provider."
     }
   ]
 }
