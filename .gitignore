@@ -7,6 +7,9 @@ ppt/
 temp/
 aws-icons/
 
+# KB corpus staging (deploy-time artifact produced by deploy/kb/build_corpus.sh)
+deploy/kb/.staging/
+
 
 # C extensions
 *.so

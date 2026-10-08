@@ -48,6 +48,44 @@
     footer { max-width: 1120px; margin: 0 auto; padding: 1rem 1.5rem 2.5rem; font-size: 0.82rem; color: var(--muted); line-height: 1.6; }
     footer kbd { font-family: inherit; font-size: .74rem; font-weight: 600; background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: .1rem .4rem; color: var(--ink); }
     @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } main { padding: 1.25rem 1rem; } }
+
+    /* ---- Course assistant chat widget (index.html only) ---- */
+    .ca-launcher { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer; background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%); color: #fff; font-size: 1.25rem; box-shadow: var(--shadow-hover); display: grid; place-items: center; transition: transform .15s ease, box-shadow .15s ease; }
+    .ca-launcher:hover { transform: translateY(-2px); }
+    .ca-launcher:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+    .ca-panel { position: fixed; right: 20px; bottom: 20px; z-index: 61; width: min(380px, calc(100vw - 32px)); height: min(560px, calc(100vh - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-hover); display: none; flex-direction: column; overflow: hidden; }
+    .ca-panel.open { display: flex; }
+    .ca-head { background: linear-gradient(135deg, var(--navy) 0%, var(--blue) 100%); color: #fff; padding: .8rem 1rem; display: flex; align-items: center; gap: .6rem; }
+    .ca-head .ca-ava { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center; background: var(--orange); color: var(--navy); font-size: .9rem; }
+    .ca-head .ca-ttl { font-size: .95rem; font-weight: 600; line-height: 1.2; }
+    .ca-head .ca-ttl small { display: block; font-size: .72rem; font-weight: 400; opacity: .8; }
+    .ca-head .ca-x { background: transparent; border: 1px solid rgba(255,255,255,.5); color: #fff; width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-size: .85rem; display: grid; place-items: center; }
+    .ca-head .ca-x:first-of-type { margin-left: auto; }
+    .ca-head .ca-x + .ca-x { margin-left: .4rem; }
+    .ca-head .ca-x:hover { background: rgba(255,255,255,.15); }
+    .ca-msgs { flex: 1; overflow-y: auto; padding: .9rem; display: flex; flex-direction: column; gap: .7rem; background: var(--bg); }
+    .ca-bubble { max-width: 85%; font-size: .86rem; line-height: 1.5; padding: .6rem .8rem; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; }
+    .ca-bubble.user { align-self: flex-end; background: var(--blue); color: #fff; border-bottom-right-radius: 4px; }
+    .ca-bubble.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--line); color: var(--ink); border-bottom-left-radius: 4px; box-shadow: var(--shadow); }
+    .ca-bubble.bot p, .ca-bubble.bot ul { margin: 0; white-space: normal; }
+    .ca-bubble.bot p + p, .ca-bubble.bot p + ul, .ca-bubble.bot ul + p { margin-top: .5rem; }
+    .ca-bubble.bot ul { padding-left: 1.15rem; }
+    .ca-bubble.bot li { margin: .15rem 0; }
+    .ca-bubble.bot code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82em; background: #eef1f5; border: 1px solid var(--line); border-radius: 4px; padding: .05rem .3rem; }
+    .ca-bubble.err { align-self: flex-start; background: #fdf4e6; border: 1px solid #f4ddb4; color: #6b4310; }
+    .ca-srcs { margin-top: .4rem; font-size: .74rem; color: var(--muted); }
+    .ca-srcs b { color: var(--teal); font-weight: 600; }
+    .ca-typing { align-self: flex-start; display: inline-flex; gap: .25rem; padding: .6rem .8rem; }
+    .ca-typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .5; animation: ca-blink 1.2s infinite; }
+    .ca-typing span:nth-child(2) { animation-delay: .2s; }
+    .ca-typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes ca-blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: .9; } }
+    .ca-input { display: flex; gap: .5rem; padding: .7rem; border-top: 1px solid var(--line); background: var(--card); }
+    .ca-input input { flex: 1; font: inherit; font-size: .88rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: #fff; }
+    .ca-input input:focus { outline: none; border-color: var(--blue); }
+    .ca-input button { flex: none; background: var(--blue); color: #fff; border: none; border-radius: 10px; width: 40px; cursor: pointer; font-size: .9rem; }
+    .ca-input button:disabled { background: #d7dde6; color: #96a1b0; cursor: not-allowed; }
+    @media (max-width: 520px) { .ca-panel { right: 8px; bottom: 8px; width: calc(100vw - 16px); height: calc(100vh - 16px); } }
   </style>
 </head>
 <body>
@@ -104,20 +142,262 @@
     // Course resources: reference handouts rendered in the shared doc.html viewer.
     const resources = [
       { doc: "lab", icon: "fa-flask", title: "Enhance and Scale Agents with Amazon Bedrock AgentCore", desc: "A hands-on lab: transform a basic customer support agent into a production-ready system using AgentCore Memory for persistent context and AgentCore Gateway for secure, Lambda-based tools with JWT auth.", meta: "Lab guide", classroom: "https://classrooms.aws.training" },
+      { icon: "fa-screwdriver-wrench", title: "Getting Started with Amazon Bedrock AgentCore", desc: "A self-paced AWS workshop that walks you through building, deploying, and operating agents end-to-end on the Amazon Bedrock AgentCore service family.", meta: "Workshop", workshop: "https://catalog.workshops.aws/agentcore-getting-started" },
     ];
     document.getElementById("grid-resources").innerHTML = resources.map((r) => `
       <article class="card resource">
         <div class="card-top">
-          <span class="kicker"><span class="icon"><i class="fa-solid ${esc(r.icon)}"></i></span> Lab</span>
+          <span class="kicker"><span class="icon"><i class="fa-solid ${esc(r.icon)}"></i></span> ${r.workshop ? "Workshop" : "Lab"}</span>
           ${r.meta ? `<span class="badge">${esc(r.meta)}</span>` : ""}
         </div>
         <h3>${esc(r.title)}</h3>
         <p class="desc">${esc(r.desc)}</p>
         <div class="actions">
-          <a class="btn btn-primary" href="doc.html?doc=${r.doc}"><i class="fa-solid fa-book-open"></i> Open lab guide</a>
+          ${r.doc ? `<a class="btn btn-primary" href="doc.html?doc=${r.doc}"><i class="fa-solid fa-book-open"></i> Open lab guide</a>` : ""}
+          ${r.workshop ? `<a class="btn btn-primary" href="${r.workshop}" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> Open workshop</a>` : ""}
           ${r.classroom ? `<a class="btn btn-classroom" href="${r.classroom}" target="_blank" rel="noopener"><i class="fa-solid fa-chalkboard-user"></i> Classroom Lab<i class="fa-solid fa-arrow-up-right-from-square" style="font-size:.72em;margin-left:.3em;opacity:.7"></i></a>` : ""}
         </div>
       </article>`).join("");
+  </script>
+
+  <!-- Course assistant chat widget (index.html only) -->
+  <button class="ca-launcher" id="caLauncher" type="button" aria-label="Open the course assistant" aria-expanded="false">
+    <i class="fa-solid fa-comments" aria-hidden="true"></i>
+  </button>
+  <div class="ca-panel" id="caPanel" role="dialog" aria-label="Course assistant" aria-hidden="true">
+    <div class="ca-head">
+      <span class="ca-ava"><i class="fa-solid fa-robot" aria-hidden="true"></i></span>
+      <span class="ca-ttl">Course Assistant<small>Amazon Bedrock AgentCore</small></span>
+      <button class="ca-x" id="caClear" type="button" aria-label="Clear the conversation" title="Clear chat"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></button>
+      <button class="ca-x" id="caClose" type="button" aria-label="Close the course assistant"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    </div>
+    <div class="ca-msgs" id="caMsgs" aria-live="polite"></div>
+    <form class="ca-input" id="caForm">
+      <input id="caInput" type="text" autocomplete="off" placeholder="Ask about the course…" aria-label="Ask the course assistant a question" />
+      <button id="caSend" type="submit" aria-label="Send"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i></button>
+    </form>
+  </div>
+
+  <script>
+    (function () {
+      // ---- Course assistant: same-origin /assistant (OAC -> Lambda) --------
+      // POSTs {message, history} and renders a KB-grounded answer + Sources.
+      // Override the endpoint with ?assistant=<url>; disable with ?assistant=off.
+      const ASSISTANT_URL = (() => {
+        const q = new URL(location.href).searchParams.get("assistant");
+        if (q === "off" || q === "none") return "";
+        if (q) return q;
+        return "/assistant";
+      })();
+      const ASSISTANT_ENABLED = !!ASSISTANT_URL;
+      const ASSISTANT_TIMEOUT_MS = 25000;
+      const HISTORY_TURNS = 6; // rolling window (user + assistant turns)
+      const SESSION_KEY = "agc-assistant-history";
+
+      // HTML-escaper mirroring the page's existing esc() for rendered text.
+      const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+      // Minimal, XSS-safe Markdown renderer for assistant answers. Escapes
+      // FIRST (so no raw HTML from the model is ever trusted), then applies a
+      // small, fixed set of inline/block rules the assistant actually emits:
+      // bold (**x** / __x__), inline code (`x`), bullet lists (lines starting
+      // with -, *, or •), and paragraph / line breaks. Everything else stays
+      // literal text.
+      function renderMarkdown(src) {
+        const inline = (line) => esc(line)
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/__(.+?)__/g, "<strong>$1</strong>")
+          .replace(/`([^`]+?)`/g, "<code>$1</code>");
+        const lines = String(src == null ? "" : src).replace(/\r\n/g, "\n").split("\n");
+        let html = "";
+        let inList = false;
+        const closeList = () => { if (inList) { html += "</ul>"; inList = false; } };
+        for (const raw of lines) {
+          const line = raw.trim();
+          const m = line.match(/^[-*•]\s+(.*)$/);
+          if (m) {
+            if (!inList) { html += "<ul>"; inList = true; }
+            html += "<li>" + inline(m[1]) + "</li>";
+          } else if (line === "") {
+            closeList();
+          } else {
+            closeList();
+            html += "<p>" + inline(line) + "</p>";
+          }
+        }
+        closeList();
+        return html;
+      }
+
+      // Copied verbatim from slides/quiz.html — SHA-256 body hash for the
+      // x-amz-content-sha256 header expected by the CloudFront/Lambda origin.
+      async function sha256Hex(str) {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+      }
+
+      const launcher = document.getElementById("caLauncher");
+      const panel = document.getElementById("caPanel");
+      const closeBtn = document.getElementById("caClose");
+      const clearBtn = document.getElementById("caClear");
+      const msgs = document.getElementById("caMsgs");
+      const form = document.getElementById("caForm");
+      const input = document.getElementById("caInput");
+      const sendBtn = document.getElementById("caSend");
+
+      // Rolling in-memory history of {role,content}; mirrored to sessionStorage.
+      let history = (() => {
+        try {
+          const raw = sessionStorage.getItem(SESSION_KEY);
+          const arr = raw ? JSON.parse(raw) : [];
+          return Array.isArray(arr) ? arr.slice(-HISTORY_TURNS) : [];
+        } catch (e) { return []; }
+      })();
+      let busy = false;
+      let greeted = false;
+
+      function persist() {
+        try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(history.slice(-HISTORY_TURNS))); } catch (e) {}
+      }
+      function pushHistory(role, content) {
+        history.push({ role, content });
+        if (history.length > HISTORY_TURNS) history = history.slice(-HISTORY_TURNS);
+        persist();
+      }
+      function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+
+      function addBubble(role, text, sources) {
+        const div = document.createElement("div");
+        div.className = "ca-bubble " + (role === "user" ? "user" : role === "err" ? "err" : "bot");
+        // Bot answers may contain light Markdown; user/error text stays literal.
+        let html = role === "bot" ? renderMarkdown(text) : esc(text);
+        if (Array.isArray(sources) && sources.length) {
+          const labels = sources
+            .map(s => esc(s && s.label))
+            .filter(Boolean)
+            .join(", ");
+          if (labels) html += `<div class="ca-srcs"><b>Sources:</b> ${labels}</div>`;
+        }
+        div.innerHTML = html;
+        msgs.appendChild(div);
+        scrollDown();
+        return div;
+      }
+
+      function addTyping() {
+        const div = document.createElement("div");
+        div.className = "ca-typing";
+        div.innerHTML = "<span></span><span></span><span></span>";
+        msgs.appendChild(div);
+        scrollDown();
+        return div;
+      }
+
+      function renderHistory() {
+        msgs.innerHTML = "";
+        history.forEach(t => addBubble(t.role === "assistant" ? "bot" : "user", t.content));
+      }
+
+      function greet() {
+        if (greeted) return;
+        greeted = true;
+        if (history.length) { renderHistory(); return; }
+        addBubble("bot", "Hi! Ask me about the course, a module, a lab, or agentic-AI best practices.");
+      }
+
+      function openPanel() {
+        panel.classList.add("open");
+        panel.setAttribute("aria-hidden", "false");
+        launcher.setAttribute("aria-expanded", "true");
+        launcher.style.display = "none";
+        greet();
+        input.focus();
+      }
+      function closePanel() {
+        panel.classList.remove("open");
+        panel.setAttribute("aria-hidden", "true");
+        launcher.setAttribute("aria-expanded", "false");
+        launcher.style.display = "grid";
+        launcher.focus();
+      }
+
+      // Clear the conversation: wipe in-memory + sessionStorage history and
+      // reset the message view back to the greeting.
+      function clearChat() {
+        if (busy) return;
+        history = [];
+        try { sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+        msgs.innerHTML = "";
+        greeted = false;
+        greet();
+        input.focus();
+      }
+
+      function setBusy(on) {
+        busy = on;
+        input.disabled = on;
+        sendBtn.disabled = on;
+      }
+
+      async function send(message) {
+        if (busy || !message) return;
+        addBubble("user", message);
+        pushHistory("user", message);
+        setBusy(true);
+        const typing = addTyping();
+
+        if (!ASSISTANT_ENABLED) {
+          typing.remove();
+          addBubble("err", "The assistant is temporarily unavailable. Please try again later.");
+          setBusy(false);
+          return;
+        }
+
+        // Send the last ~6 turns as context (excluding the just-added turn).
+        const body = JSON.stringify({
+          message,
+          history: history.slice(0, -1).slice(-HISTORY_TURNS).map(t => ({ role: t.role, content: t.content })),
+        });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ASSISTANT_TIMEOUT_MS);
+        try {
+          const hash = await sha256Hex(body);
+          const res = await fetch(ASSISTANT_URL, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-amz-content-sha256": hash },
+            body, signal: ctrl.signal,
+          });
+          typing.remove();
+          if (!res.ok) throw new Error("bad status " + res.status);
+          const data = await res.json();
+          const answer = (data && typeof data.answer === "string") ? data.answer.trim() : "";
+          if (!answer) throw new Error("empty answer");
+          const sources = (data && Array.isArray(data.sources)) ? data.sources : [];
+          addBubble("bot", answer, sources);
+          pushHistory("assistant", answer);
+        } catch (e) {
+          typing.remove();
+          // Non-200 / network / timeout: friendly fallback, history intact.
+          addBubble("err", "The assistant is temporarily unavailable. Please try again in a moment.");
+        } finally {
+          clearTimeout(timer);
+          setBusy(false);
+          input.focus();
+        }
+      }
+
+      launcher.addEventListener("click", openPanel);
+      closeBtn.addEventListener("click", closePanel);
+      clearBtn.addEventListener("click", clearChat);
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && panel.classList.contains("open")) closePanel(); });
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const message = input.value.trim();
+        if (!message) return;
+        input.value = "";
+        send(message);
+      });
+    })();
   </script>
 </body>
 </html>

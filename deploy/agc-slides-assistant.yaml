@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Building Agentic AI with Amazon Bedrock AgentCore - Slides Pipeline - course
+  assistant backend. A Python Lambda answers learner questions about the course
+  (modules, labs, agentic-AI best practices) using Amazon Bedrock (Claude Haiku
+  4.5) in this region, grounded on the project Knowledge Base. It refuses
+  knowledge-check / quiz answers (that is the judge's job). The function is
+  exposed through a Lambda Function URL with IAM auth; only the course
+  CloudFront distribution can reach it (via Origin Access Control, SigV4-signed),
+  and the function additionally verifies a secret origin header that CloudFront
+  injects and the browser never sees. Reserved concurrency caps blast radius /
+  cost. No public, unauthenticated surface.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Description: Prefix for all resource names
+    Default: agc
+
+  AssistantModelId:
+    Type: String
+    Description: Bedrock model (inference profile) id used to answer questions
+    Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+  OriginSecret:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Shared secret CloudFront sends as the x-origin-secret header; the Lambda
+      rejects requests that do not match. Blocks direct hits on the CloudFront
+      /assistant path.
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 3
+    Description: >-
+      Hard ceiling on concurrent assistant executions (cost / abuse cap). When
+      the ceiling throttles a request the assistant degrades gracefully: the
+      frontend treats the non-200 as a soft failure (res.ok check), so the page
+      is never blocked. Raise this value in agc-slides-root.yaml
+      (ReservedConcurrency param, threaded into AssistantStack) for large
+      cohorts that need more headroom.
+
+  CloudFrontDistributionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the CloudFront distribution allowed to invoke the Function URL via
+      OAC. When set, the Lambda resource policy is scoped to this exact ARN
+      (aws:SourceArn), per AWS guidance. Leave empty on the very first create
+      (before the distribution exists); set it on the next deploy.
+
+  KnowledgeBaseId:
+    Type: String
+    Default: ""
+    Description: >-
+      Project-level Bedrock Knowledge Base id. Empty (default) => the assistant
+      returns "not configured" (503) until a KB id is wired. Set by the deploy
+      script only after the KB stack exists AND its ingestion is COMPLETE.
+
+  KnowledgeBaseArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the Knowledge Base. When non-empty, the conditional
+      AssistantKbPolicy grants bedrock:Retrieve scoped to this ARN. Empty => no
+      retrieval grant.
+
+  EmbeddingModelId:
+    Type: String
+    Default: cohere.embed-english-v3
+    Description: Embedding model id (for the scoped bedrock:InvokeModel grant).
+
+Conditions:
+  HasDistributionArn: !Not [!Equals [!Ref CloudFrontDistributionArn, ""]]
+  HasKnowledgeBase: !Not [!Equals [!Ref KnowledgeBaseArn, ""]]
+
+Resources:
+  #==================================
+  # Execution role: logs + Bedrock invoke
+  #==================================
+  AssistantFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectPrefix}-course-assistant-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Global inference profile fans out across regions, so allow the
+              # foundation-model ARNs in the regions the APAC/Global profile can
+              # route to, plus the inference-profile ARN itself. Structurally
+              # identical to the judge's BedrockInvoke policy, with
+              # ${JudgeModelId} replaced by ${AssistantModelId}.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/${AssistantModelId}"
+                  - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*anthropic.claude-haiku-4-5*"
+
+  #==================================
+  # KB retrieval grant — SEPARATE conditional policy so the base role is
+  # identical when the KB is empty. Renders only when KnowledgeBaseArn is
+  # non-empty.
+  #==================================
+  AssistantKbPolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasKnowledgeBase
+    Properties:
+      PolicyName: BedrockRetrieve
+      Roles:
+        - !Ref AssistantFunctionRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: bedrock:Retrieve
+            Resource: !Ref KnowledgeBaseArn
+          - Effect: Allow
+            Action: bedrock:InvokeModel
+            Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+
+  #==================================
+  # Assistant Lambda
+  #==================================
+  AssistantFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectPrefix}-course-assistant"
+      Runtime: python3.12
+      Handler: handler.handler
+      Role: !GetAtt AssistantFunctionRole.Arn
+      Timeout: 29
+      MemorySize: 256
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          BEDROCK_REGION: !Ref AWS::Region
+          ASSISTANT_MODEL_ID: !Ref AssistantModelId
+          ORIGIN_SECRET: !Ref OriginSecret
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+      Code:
+        ZipFile: |
+          # Placeholder. Real code is deployed by the deploy script, which
+          # updates the function code from deploy/assistant/handler.py after the
+          # stack creates the function. This inline stub keeps the template
+          # self-contained and valid on first create.
+          import json
+          def handler(event, context):
+              return {"statusCode": 503,
+                      "headers": {"Content-Type": "application/json"},
+                      "body": json.dumps({"error": "assistant code not yet published"})}
+
+  #==================================
+  # Function URL (IAM auth) — only CloudFront (OAC) may call it
+  #==================================
+  AssistantFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref AssistantFunction
+      AuthType: AWS_IAM
+      InvokeMode: BUFFERED
+      # NB: Function URL CORS AllowMethods does not accept OPTIONS (preflight is
+      # handled automatically). Listing it fails CloudFormation early validation.
+      Cors:
+        AllowOrigins: ["*"]
+        AllowMethods: ["POST"]
+        AllowHeaders: ["content-type", "x-origin-secret"]
+        MaxAge: 300
+
+  # Allow the CloudFront service principal to invoke the Function URL. When the
+  # distribution ARN is supplied, scope to that exact distribution via
+  # aws:SourceArn (the pattern AWS documents for OAC + Lambda); otherwise fall
+  # back to SourceAccount for the first create before the distribution exists.
+  AssistantUrlCloudFrontPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AssistantFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      FunctionUrlAuthType: AWS_IAM
+      SourceArn: !If [HasDistributionArn, !Ref CloudFrontDistributionArn, !Ref "AWS::NoValue"]
+      SourceAccount: !If [HasDistributionArn, !Ref "AWS::NoValue", !Ref "AWS::AccountId"]
+
+  # OAC-signed invocation also requires lambda:InvokeFunction (confirmed against
+  # the AWS "Restrict access to a Lambda function URL origin" guide, which grants
+  # BOTH actions). Without this, every request is rejected 403 before the
+  # function runs, even though InvokeFunctionUrl is granted.
+  AssistantInvokeCloudFrontPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AssistantFunction
+      Action: lambda:InvokeFunction
+      Principal: cloudfront.amazonaws.com
+      SourceArn: !If [HasDistributionArn, !Ref CloudFrontDistributionArn, !Ref "AWS::NoValue"]
+      SourceAccount: !If [HasDistributionArn, !Ref "AWS::NoValue", !Ref "AWS::AccountId"]
+
+Outputs:
+  AssistantFunctionName:
+    Description: Name of the assistant Lambda (deploy script publishes code to it)
+    Value: !Ref AssistantFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-AssistantFunctionName"
+
+  AssistantFunctionUrl:
+    Description: Full Function URL (https://...)
+    Value: !GetAtt AssistantFunctionUrl.FunctionUrl
+
+  AssistantFunctionUrlDomain:
+    Description: Host portion of the Function URL, used as a CloudFront origin domain
+    Value: !Select [2, !Split ["/", !GetAtt AssistantFunctionUrl.FunctionUrl]]
+    Export:
+      Name: !Sub "${AWS::StackName}-AssistantFunctionUrlDomain"

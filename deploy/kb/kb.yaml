@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Building Agentic AI with Amazon Bedrock AgentCore - Project-level Bedrock
+  Knowledge Base. Creates an S3 data-source bucket, an S3 Vectors bucket +
+  index, a scoped Knowledge Base role, a Bedrock Knowledge Base (S3 Vectors
+  storage), and its S3 data source over the course module decks and lab guide.
+  NOTE: EmbeddingModelId and VectorIndex.Dimension are coupled and MUST be
+  changed together; the default cohere.embed-english-v3 is 1024-dim.
+
+Parameters:
+  ProjectPrefix:
+    Type: String
+    Default: agc
+    Description: Base name used for all resources (matches agc-slides-*.yaml).
+
+  EmbeddingModelId:
+    Type: String
+    Default: cohere.embed-english-v3
+    Description: >-
+      Embedding model for the Knowledge Base. COUPLED with VectorIndex.Dimension
+      (below) and MUST be changed together; the default cohere.embed-english-v3
+      is 1024-dim. Overriding to a non-1024 model creates the stack cleanly but
+      fails later at ingestion (see the poll's failureReasons in the deploy
+      script).
+
+Resources:
+  # ---------------------------------------------------------------
+  # S3 Bucket for Knowledge Base documents (data source)
+  # ---------------------------------------------------------------
+  DataSourceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub "${ProjectPrefix}-kb-datasource-${AWS::AccountId}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectPrefix
+
+  # ---------------------------------------------------------------
+  # S3 Vector Bucket + Vector Index (replaces OpenSearch)
+  # ---------------------------------------------------------------
+  VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    DeletionPolicy: Delete
+    Properties:
+      VectorBucketName: !Sub "${ProjectPrefix}-kb-vectors-${AWS::AccountId}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectPrefix
+
+  VectorIndex:
+    Type: AWS::S3Vectors::Index
+    DependsOn: VectorBucket
+    DeletionPolicy: Delete
+    Properties:
+      VectorBucketName: !Sub "${ProjectPrefix}-kb-vectors-${AWS::AccountId}"
+      IndexName: !Sub "${ProjectPrefix}-kb-index"
+      DataType: float32
+      # COUPLED with EmbeddingModelId (Parameters): 1024 matches
+      # cohere.embed-english-v3's native output. Change both together.
+      Dimension: 1024
+      DistanceMetric: cosine
+      # S3 Vectors makes ALL metadata filterable by default, with a 2048-byte
+      # cap per filterable key. Bedrock writes several per-chunk metadata keys
+      # whose size scales with the chunk/source — confirmed empirically from an
+      # indexed vector: AMAZON_BEDROCK_TEXT (the chunk body) and
+      # AMAZON_BEDROCK_METADATA (a JSON blob with source location, document id,
+      # dates) both exceed 2048 bytes on large documents, so ingestion rejects
+      # those chunks ("Filterable metadata must have at most 2048 bytes").
+      # We never filter on any Bedrock-managed key (retrieval is pure semantic,
+      # no metadata filter), so mark ALL of them non-filterable. This is the
+      # complete set Bedrock writes for an S3 text data source.
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_TEXT
+          - AMAZON_BEDROCK_METADATA
+          - x-amz-bedrock-kb-source-file-modality
+          - x-amz-bedrock-kb-data-source-id
+
+  # ---------------------------------------------------------------
+  # IAM Role for the Knowledge Base (exactly three scoped inline policies)
+  # ---------------------------------------------------------------
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectPrefix}-kb-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockFoundationModelAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+        - PolicyName: S3DataSourceAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DataSourceBucket.Arn
+                  - !Sub "${DataSourceBucket.Arn}/*"
+        - PolicyName: S3VectorsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3vectors:PutVectors
+                  - s3vectors:GetVectors
+                  - s3vectors:DeleteVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:GetIndex
+                Resource:
+                  - !GetAtt VectorIndex.IndexArn
+
+  # ---------------------------------------------------------------
+  # Bedrock Knowledge Base with S3 Vectors storage
+  # ---------------------------------------------------------------
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    DependsOn:
+      - KnowledgeBaseRole
+      - VectorIndex
+    Properties:
+      Name: !Sub "${ProjectPrefix}-course-kb"
+      Description: Building Agentic AI with Amazon Bedrock AgentCore course module decks and lab guide.
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}"
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt VectorIndex.IndexArn
+      Tags:
+        Project: !Ref ProjectPrefix
+
+  # ---------------------------------------------------------------
+  # Data Source (S3 bucket with the staged corpus)
+  # ---------------------------------------------------------------
+  KnowledgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      Name: !Sub "${ProjectPrefix}-kb-datasource"
+      Description: Course decks + lab guide data source.
+      KnowledgeBaseId: !Ref KnowledgeBase
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt DataSourceBucket.Arn
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 512
+            OverlapPercentage: 20
+
+  # ---------------------------------------------------------------
+  # SSM Parameters (discovery; no Export, so no cross-stack collision)
+  # ---------------------------------------------------------------
+  KnowledgeBaseIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${ProjectPrefix}-kb-id"
+      Type: String
+      Value: !Ref KnowledgeBase
+      Description: Knowledge Base ID for the course KB.
+
+  DataSourceIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${ProjectPrefix}-kb-datasource-id"
+      Type: String
+      Value: !GetAtt KnowledgeBaseDataSource.DataSourceId
+      Description: Data Source ID for the course KB.
+
+  DataSourceBucketParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "${ProjectPrefix}-kb-datasource-bucket"
+      Type: String
+      Value: !Ref DataSourceBucket
+      Description: S3 bucket for the course KB documents.
+
+Outputs:
+  KnowledgeBaseId:
+    Description: Knowledge Base ID (consumed by the deploy script to drive ingestion and root wiring)
+    Value: !Ref KnowledgeBase
+
+  KnowledgeBaseArn:
+    # !Ref on AWS::Bedrock::KnowledgeBase returns the KB id, so this
+    # knowledge-base/${KnowledgeBase} ARN shape matches the assistant stack's
+    # bedrock:Retrieve grant (knowledge-base/${KnowledgeBase}).
+    Description: Knowledge Base ARN (threaded into the assistant stack's bedrock:Retrieve grant)
+    Value: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/${KnowledgeBase}"
+
+  DataSourceId:
+    Description: Data Source ID (used by start-ingestion-job / get-ingestion-job)
+    Value: !GetAtt KnowledgeBaseDataSource.DataSourceId
+
+  DataSourceBucketName:
+    Description: Name of the S3 data-source bucket (aws s3 sync target for the corpus)
+    Value: !Ref DataSourceBucket

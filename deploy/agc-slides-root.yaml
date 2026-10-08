@@ -34,21 +34,53 @@ Parameters:
     Type: String
     NoEcho: true
     Description: >-
-      Shared secret CloudFront injects as x-origin-secret toward the judge
-      Lambda, which rejects mismatches. Supply a random value at deploy time.
+      Shared secret CloudFront injects as x-origin-secret toward both the judge
+      and assistant Lambdas, which reject mismatches. Supply a random value at
+      deploy time.
 
   JudgeModelId:
     Type: String
     Description: Bedrock model (inference profile) id used by the AI judge
     Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
 
+  AssistantModelId:
+    Type: String
+    Description: Bedrock model (inference profile) id used by the course assistant
+    Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+  ReservedConcurrency:
+    Type: Number
+    Default: 3
+    Description: Hard ceiling on concurrent assistant executions (cost / abuse cap)
+
+  KnowledgeBaseId:
+    Type: String
+    Default: ""
+    Description: >-
+      Bedrock Knowledge Base id threaded into the assistant. Empty => the
+      assistant renders 503 "not configured". Re-derived by the deploy script
+      from the sibling KB stack only when its ingestion sentinel is COMPLETE.
+
+  KnowledgeBaseArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Knowledge Base ARN threaded into the assistant's conditional
+      bedrock:Retrieve grant. Empty => no retrieval grant.
+
+  EmbeddingModelId:
+    Type: String
+    Default: cohere.embed-english-v3
+    Description: Embedding model id (for the assistant's scoped bedrock:InvokeModel grant).
+
   JudgeDistributionArn:
     Type: String
     Default: ""
     Description: >-
-      ARN of the existing CloudFront distribution, used to scope the judge
-      Lambda's resource policy to that exact distribution (aws:SourceArn).
-      Supplied by the deploy script after the distribution id is known.
+      ARN of the existing CloudFront distribution, used to scope the judge and
+      assistant Lambda resource policies to that exact distribution
+      (aws:SourceArn). Supplied by the deploy script after the distribution id
+      is known.
 
 Resources:
   # Lambda function to retrieve SSM parameters (shared config lives under ParameterPrefix)
@@ -174,6 +206,29 @@ Resources:
         - Key: Name
           Value: !Sub '${ProjectPrefix}-JudgeStack'
 
+  # KB-grounded course assistant backend: Lambda + IAM-auth Function URL - nested
+  # by S3 URL. Parallel to JudgeStack; reuses the same OriginSecret and the same
+  # self-referential distribution ARN. The KB stack is a SIBLING deployed by the
+  # script; this stack only receives the resolved KB id/arn as parameters.
+  AssistantStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub
+        - 'https://${Bucket}.s3.${BucketRegion}.amazonaws.com/${Prefix}/assistant.yaml'
+        - Bucket: !GetAtt BucketNameParam.Value
+      Parameters:
+        ProjectPrefix: !Ref ProjectPrefix
+        AssistantModelId: !Ref AssistantModelId
+        OriginSecret: !Ref OriginSecret
+        ReservedConcurrency: !Ref ReservedConcurrency
+        CloudFrontDistributionArn: !Ref JudgeDistributionArn
+        KnowledgeBaseId: !Ref KnowledgeBaseId
+        KnowledgeBaseArn: !Ref KnowledgeBaseArn
+        EmbeddingModelId: !Ref EmbeddingModelId
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectPrefix}-AssistantStack'
+
   # CloudFront distribution + OAC + bucket policy + Route53 alias - nested by S3 URL.
   CloudFrontDistributionStack:
     Type: AWS::CloudFormation::Stack
@@ -189,6 +244,7 @@ Resources:
         ContentBucketName: !GetAtt ContentBucketStack.Outputs.ContentBucketName
         ContentBucketDomainName: !GetAtt ContentBucketStack.Outputs.ContentBucketDomainName
         JudgeFunctionUrlDomain: !GetAtt JudgeStack.Outputs.JudgeFunctionUrlDomain
+        AssistantFunctionUrlDomain: !GetAtt AssistantStack.Outputs.AssistantFunctionUrlDomain
         OriginSecret: !Ref OriginSecret
       Tags:
         - Key: Name
@@ -224,3 +280,11 @@ Outputs:
   JudgeFunctionUrl:
     Description: AI judge Lambda Function URL (private; reachable only via CloudFront /judge)
     Value: !GetAtt JudgeStack.Outputs.JudgeFunctionUrl
+
+  AssistantFunctionName:
+    Description: Name of the course assistant Lambda (publish deploy/assistant/handler.py to it)
+    Value: !GetAtt AssistantStack.Outputs.AssistantFunctionName
+
+  AssistantFunctionUrl:
+    Description: Course assistant Lambda Function URL (private; reachable only via CloudFront /assistant)
+    Value: !GetAtt AssistantStack.Outputs.AssistantFunctionUrl

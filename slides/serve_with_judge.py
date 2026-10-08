@@ -8,11 +8,18 @@ to the deployed endpoint, adding the x-amz-content-sha256 body hash CloudFront's
 OAC requires, so the AI judge works end-to-end on localhost exactly like
 production.
 
+The same proxy also forwards POST /assistant to the deployed course assistant
+(the KB-grounded chatbot on the slides landing page), adding the same
+x-amz-content-sha256 body hash, so the assistant works end-to-end on localhost
+exactly like production.
+
 Usage:
     python3 slides/serve_with_judge.py [PORT]        # default 8010
     JUDGE_UPSTREAM=https://agc.aws.yikyakyuk.com/judge python3 slides/serve_with_judge.py
+    ASSISTANT_UPSTREAM=https://agc.aws.yikyakyuk.com/assistant python3 slides/serve_with_judge.py
 
-Then open:  http://localhost:8010/quiz.html?m=1
+Then open:  http://localhost:8010/quiz.html?m=1   (quiz judge)
+            http://localhost:8010/index.html       (course assistant widget)
 """
 import hashlib
 import http.server
@@ -24,6 +31,9 @@ import urllib.request
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8010
 DIR = os.path.dirname(os.path.abspath(__file__))
 UPSTREAM = os.environ.get("JUDGE_UPSTREAM", "https://agc.aws.yikyakyuk.com/judge")
+ASSISTANT_UPSTREAM = os.environ.get(
+    "ASSISTANT_UPSTREAM", "https://agc.aws.yikyakyuk.com/assistant"
+)
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -31,7 +41,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*a, directory=DIR, **k)
 
     def do_POST(self):
-        if self.path.rstrip("/") != "/judge":
+        # Route on the request path: /judge -> judge upstream, /assistant ->
+        # assistant upstream. Both add the x-amz-content-sha256 body hash the
+        # CloudFront OAC -> IAM Function URL requires.
+        route = self.path.rstrip("/")
+        if route == "/judge":
+            upstream = UPSTREAM
+        elif route == "/assistant":
+            upstream = ASSISTANT_UPSTREAM
+        else:
             self.send_error(404, "Not found")
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -39,7 +57,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         # CloudFront OAC -> IAM Function URL requires the SHA256 payload hash.
         body_hash = hashlib.sha256(body).hexdigest()
         req = urllib.request.Request(
-            UPSTREAM, data=body, method="POST",
+            upstream, data=body, method="POST",
             headers={"content-type": "application/json",
                      "x-amz-content-sha256": body_hash},
         )
@@ -71,8 +89,10 @@ class TCPServer(socketserver.ThreadingTCPServer):
 
 if __name__ == "__main__":
     print(f"Serving {DIR} at http://localhost:{PORT}/")
-    print(f"  /judge  ->  {UPSTREAM}  (proxied, body-hash added)")
-    print(f"Open: http://localhost:{PORT}/quiz.html?m=1")
+    print(f"  /judge      ->  {UPSTREAM}  (proxied, body-hash added)")
+    print(f"  /assistant  ->  {ASSISTANT_UPSTREAM}  (proxied, body-hash added)")
+    print(f"Open: http://localhost:{PORT}/quiz.html?m=1  (quiz judge)")
+    print(f"      http://localhost:{PORT}/index.html      (course assistant)")
     print("Ctrl-C to stop.")
     with TCPServer(("127.0.0.1", PORT), Handler) as httpd:
         try:

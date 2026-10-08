@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "NIT",
+      "location": "design.md §1.4",
+      "problem": "Fallback module-name substitution is specified as re.sub(r\"[_-]+\", \" \", group2) but the reference handler it is said to copy verbatim uses re.sub(r\"_+\", \" \", m.group(2)); the changed character class is an intentional but undeclared deviation (and the path is dead for modules 1-6).",
+      "fix": "List the fallback re.sub change (_+ -> [-_]+) as a deliberate edit rather than under 'copied verbatim', and note the path never fires for the 1-6 corpus."
+    },
+    {
+      "severity": "NIT",
+      "location": "design.md §3.5",
+      "problem": "The build_corpus allow-list pattern MLAGAC-*-EN-M0[1-9]-*_InstructorDeck.md only matches single-digit module numbers, while the §1.4 regex (M0?(\\d+)) and the copy glob (M0*) accept two digits; a future M10+ deck would pass glob/regex but be rejected by the allow-list, inconsistent with the stated 'future growth' intent.",
+      "fix": "Either state the M01-M09 ceiling explicitly, or widen the allow-list to match the glob/regex (e.g. M0?[0-9]+); make the three patterns agree."
+    },
+    {
+      "severity": "NIT",
+      "location": "design.md §3.3",
+      "problem": "Claims the assistant's base BedrockInvoke policy is 'byte-identical' to the judge's, but the judge interpolates ${JudgeModelId} while the assistant uses ${AssistantModelId}, so the template text is equivalent, not byte-identical.",
+      "fix": "Reword to 'structurally identical, with ${JudgeModelId} replaced by ${AssistantModelId}'."
+    },
+    {
+      "severity": "NIT",
+      "location": "design.md §3.6/§4",
+      "problem": "Reusing the single OriginSecret for the assistant leaves the OriginSecret parameter Description in the root/cloudfront templates ('toward the judge Lambda') stale/misleading; the design does not call this out.",
+      "fix": "Note that the OriginSecret parameter descriptions should be updated to mention both the judge and assistant origins."
+    }
+  ],
+  "reviewDoc": "/Users/erictole/demo/Building-Agentic-AI-with-Amazon-Bedrock-AgentCore/.agents/tasks/port-course-assistant-kb/design-review.md"
+}

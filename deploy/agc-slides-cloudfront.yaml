@@ -42,10 +42,16 @@ Parameters:
     Type: String
     Description: Host of the AI judge Lambda Function URL (added as a second origin for /judge*)
 
+  AssistantFunctionUrlDomain:
+    Type: String
+    Description: Host of the course assistant Lambda Function URL (added as a third origin for /assistant*)
+
   OriginSecret:
     Type: String
     NoEcho: true
-    Description: Secret value sent to the judge origin as x-origin-secret (verified by the Lambda)
+    Description: >-
+      Secret value sent to both the judge and assistant origins as
+      x-origin-secret (verified by each Lambda)
 
 Resources:
   #==================================
@@ -175,6 +181,19 @@ Resources:
             OriginCustomHeaders:
               - HeaderName: x-origin-secret
                 HeaderValue: !Ref OriginSecret
+          # Course assistant Lambda Function URL, reached via the SAME Lambda OAC
+          # as the judge. CloudFront adds the same secret origin header the
+          # browser never sees; the assistant Lambda verifies it.
+          - DomainName: !Ref AssistantFunctionUrlDomain
+            Id: !Sub "${ProjectPrefix}-assistant"
+            OriginAccessControlId: !GetAtt LambdaOriginAccessControl.Id
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              HTTPSPort: 443
+            OriginCustomHeaders:
+              - HeaderName: x-origin-secret
+                HeaderValue: !Ref OriginSecret
         DefaultCacheBehavior:
           AllowedMethods: [GET, HEAD, OPTIONS]
           TargetOriginId: !Sub "${ProjectPrefix}-s3"
@@ -191,6 +210,18 @@ Resources:
           # passed through untouched (not rewritten to /judge/index.html).
           - PathPattern: /judge*
             TargetOriginId: !Sub "${ProjectPrefix}-judge"
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad          # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # Managed-AllViewerExceptHostHeader
+          # KB-grounded course assistant endpoint -> assistant Lambda. Exact
+          # parallel to /judge*: no caching, forward the POST body and all
+          # viewer headers, and NO viewer-request rewrite function so /assistant
+          # passes through untouched (not rewritten to /assistant/index.html).
+          - PathPattern: /assistant*
+            TargetOriginId: !Sub "${ProjectPrefix}-assistant"
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             CachedMethods: [GET, HEAD]
