@@ -109,6 +109,15 @@ Resources:
   #==================================
   CloudFrontLogBucket:
     Type: AWS::S3::Bucket
+    Metadata:
+      # cfn-lint W3045 flags AccessControl as legacy. Kept deliberately: this is
+      # the ACL grant CloudFront standard logging relies on, paired with
+      # BucketOwnerPreferred below. Removing it on a live logging bucket risks
+      # breaking log delivery, so it stays until logging is migrated.
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3045
     Properties:
       AccessControl: LogDeliveryWrite
       BucketName: !Sub '${ProjectPrefix}-logging-${AWS::Region}-${AWS::AccountId}'

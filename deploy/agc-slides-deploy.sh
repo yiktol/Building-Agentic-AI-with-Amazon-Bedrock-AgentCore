@@ -437,6 +437,21 @@ if ! $CONTENT_ONLY; then
   publish_assistant_code
 fi
 
+# --------------------------------------------- validate quizzes before publish ---
+# Gate: the knowledge-check quizzes are a mN.json/mN.js pair that must stay in
+# sync, and each question has mechanical invariants (4 options, answer ==
+# options[answerIndex], answerLetter consistent, sequential ids). A hand-edit
+# can silently break these, and the sync below would ship the breakage. Fail
+# the publish if slides/build_quiz.py reports any problem. Runs on every publish
+# path (including --content-only), since that is exactly when quiz files ship.
+QUIZ_VALIDATOR="$WEB_DIR/build_quiz.py"
+if [[ -f "$QUIZ_VALIDATOR" ]]; then
+  log "Validating knowledge-check quizzes (slides/build_quiz.py)"
+  python3 "$QUIZ_VALIDATOR" || { err "quiz validation failed; not publishing"; exit 1; }
+else
+  log "Quiz validator not found ($QUIZ_VALIDATOR); skipping quiz validation"
+fi
+
 # ------------------------------------------------------ publish web content ---
 # Sync the Web_Viewer to the content bucket root. --delete keeps the bucket in
 # sync with the slides/ tree (removes files that were removed locally). The

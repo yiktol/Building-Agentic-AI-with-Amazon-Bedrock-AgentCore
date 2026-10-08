@@ -131,9 +131,8 @@ Resources:
   # ---------------------------------------------------------------
   KnowledgeBase:
     Type: AWS::Bedrock::KnowledgeBase
-    DependsOn:
-      - KnowledgeBaseRole
-      - VectorIndex
+    # Ordering is enforced implicitly: RoleArn (!GetAtt KnowledgeBaseRole) and
+    # StorageConfiguration.IndexArn (!GetAtt VectorIndex) create the dependencies.
     Properties:
       Name: !Sub "${ProjectPrefix}-course-kb"
       Description: Building Agentic AI with Amazon Bedrock AgentCore course module decks and lab guide.
